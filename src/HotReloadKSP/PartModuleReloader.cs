@@ -60,12 +60,7 @@ internal static class PartModuleReloader
                     catch (Exception ex)
                     {
                         Log.Warn(
-                            "Save threw for "
-                                + m.GetType().FullName
-                                + " on part "
-                                + part.partInfo?.name
-                                + ": "
-                                + ex
+                            $"Save threw for {m.GetType().FullName} on part {part.partInfo?.name}: {ex}"
                         );
                     }
 
@@ -142,13 +137,7 @@ internal static class PartModuleReloader
                 if (node == null)
                 {
                     Log.Warn(
-                        "Prefab "
-                            + ap.name
-                            + " module "
-                            + name
-                            + " at index "
-                            + origIndex
-                            + " has no matching MODULE node in partConfig; skipping"
+                        $"Prefab {ap.name} module {name} at index {origIndex} has no matching MODULE node in partConfig; skipping"
                     );
                     continue;
                 }
@@ -164,12 +153,7 @@ internal static class PartModuleReloader
                 catch (Exception ex)
                 {
                     Log.Error(
-                        "AddModule threw during prefab rebuild for "
-                            + ap.name
-                            + "/"
-                            + name
-                            + ": "
-                            + ex
+                        $"AddModule threw during prefab rebuild for {ap.name}/{name}: {ex}"
                     );
                     continue;
                 }
@@ -210,7 +194,7 @@ internal static class PartModuleReloader
             if (part == null)
             {
                 Log.Warn(
-                    "Part with persistentId " + kv.Key + " not found at reattach time; skipping"
+                    $"Part with persistentId {kv.Key} not found at reattach time; skipping"
                 );
                 continue;
             }
@@ -223,11 +207,7 @@ internal static class PartModuleReloader
                 if (snap.PrefabNode == null)
                 {
                     Log.Warn(
-                        "No prefab MODULE node captured for "
-                            + snap.ModuleName
-                            + " on part "
-                            + part.partInfo?.name
-                            + "; skipping"
+                        $"No prefab MODULE node captured for {snap.ModuleName} on part {part.partInfo?.name}; skipping"
                     );
                     continue;
                 }
@@ -240,12 +220,7 @@ internal static class PartModuleReloader
                 catch (Exception ex)
                 {
                     Log.Error(
-                        "AddModule threw for "
-                            + snap.ModuleName
-                            + " on part "
-                            + part.partInfo?.name
-                            + ": "
-                            + ex
+                        $"AddModule threw for {snap.ModuleName} on part {part.partInfo?.name}: {ex}"
                     );
                     continue;
                 }
@@ -260,12 +235,7 @@ internal static class PartModuleReloader
                 catch (Exception ex)
                 {
                     Log.Error(
-                        "Load threw for "
-                            + snap.ModuleName
-                            + " on part "
-                            + part.partInfo?.name
-                            + ": "
-                            + ex
+                        $"Load threw for {snap.ModuleName} on part {part.partInfo?.name}: {ex}"
                     );
                 }
 

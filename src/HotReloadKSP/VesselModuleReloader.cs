@@ -43,12 +43,7 @@ internal static class VesselModuleReloader
                 catch (Exception ex)
                 {
                     Log.Warn(
-                        "Save threw for "
-                            + m.GetType().FullName
-                            + " on vessel "
-                            + v.vesselName
-                            + ": "
-                            + ex
+                        $"Save threw for {m.GetType().FullName} on vessel {v.vesselName}: {ex}"
                     );
                 }
 
@@ -128,13 +123,11 @@ internal static class VesselModuleReloader
                 }
 
                 VesselModuleManager.modules.Add(wrapper);
-                Log.Info(
-                    "Registered VesselModule " + t.FullName + " (order " + wrapper.order + ")"
-                );
+                Log.Info($"Registered VesselModule {t.FullName} (order {wrapper.order})");
             }
             catch (Exception ex)
             {
-                Log.Error("Failed to register VesselModule " + t.FullName + ": " + ex);
+                Log.Error($"Failed to register VesselModule {t.FullName}: {ex}");
             }
         }
     }
@@ -206,10 +199,7 @@ internal static class VesselModuleReloader
                 if (target == null)
                 {
                     Log.Warn(
-                        "Could not find reattached module "
-                            + snap.TypeName
-                            + " on vessel "
-                            + v.vesselName
+                        $"Could not find reattached module {snap.TypeName} on vessel {v.vesselName}"
                     );
                     continue;
                 }
@@ -221,7 +211,7 @@ internal static class VesselModuleReloader
                 catch (Exception ex)
                 {
                     Log.Error(
-                        "Load threw for " + snap.TypeName + " on vessel " + v.vesselName + ": " + ex
+                        $"Load threw for {snap.TypeName} on vessel {v.vesselName}: {ex}"
                     );
                 }
             }

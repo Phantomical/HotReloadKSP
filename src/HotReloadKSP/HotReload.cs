@@ -18,7 +18,7 @@ public static class HotReload
             throw new ArgumentNullException(nameof(newAssembly));
 
         var sw = Stopwatch.StartNew();
-        Log.Info("Reloading " + newAssembly.GetName().Name);
+        Log.Info($"Reloading {newAssembly.GetName().Name}");
 
         var oldAssembly = LoadAssembly(newAssembly);
         UpdateTypeLookups(oldAssembly, newAssembly);
