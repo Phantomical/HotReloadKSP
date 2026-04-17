@@ -10,6 +10,12 @@ internal static class MonoBehaviourReloader
     const BindingFlags HookFlags =
         BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
 
+    struct TypeEntry
+    {
+        public Type Type;
+        public MethodInfo Hook;
+    }
+
     struct Swap
     {
         public MonoBehaviour Old;
@@ -52,28 +58,18 @@ internal static class MonoBehaviourReloader
                 continue;
 
             var oldType = oldComp.GetType();
-            if (!newTypes.TryGetValue(oldType.FullName, out var newType))
-                continue;
-
-            var hook = newType.GetMethod(
-                "OnHotReload",
-                HookFlags,
-                null,
-                [typeof(MonoBehaviour)],
-                null
-            );
-            if (hook == null)
+            if (!newTypes.TryGetValue(oldType.FullName, out var entry))
                 continue;
 
             var go = oldComp.gameObject;
             if (go == null)
                 continue;
 
-            var typeName = newType.FullName;
+            var typeName = entry.Type.FullName;
             Component newComp;
             try
             {
-                newComp = go.AddComponent(newType);
+                newComp = go.AddComponent(entry.Type);
             }
             catch (Exception ex)
             {
@@ -93,7 +89,7 @@ internal static class MonoBehaviourReloader
                 {
                     Old = oldComp,
                     New = (MonoBehaviour)newComp,
-                    Hook = hook,
+                    Hook = entry.Hook,
                     TypeName = typeName,
                 }
             );
@@ -151,7 +147,7 @@ internal static class MonoBehaviourReloader
         }
     }
 
-    static Dictionary<string, Type> BuildNewTypeIndex(Assembly newAsm)
+    static Dictionary<string, TypeEntry> BuildNewTypeIndex(Assembly newAsm)
     {
         Type[] types;
         try
@@ -163,7 +159,7 @@ internal static class MonoBehaviourReloader
             types = ex.Types;
         }
 
-        var index = new Dictionary<string, Type>();
+        var index = new Dictionary<string, TypeEntry>();
         for (int i = 0; i < types.Length; i++)
         {
             var t = types[i];
@@ -177,7 +173,18 @@ internal static class MonoBehaviourReloader
                 continue;
             if (t.FullName == null)
                 continue;
-            index[t.FullName] = t;
+
+            var hook = t.GetMethod(
+                "OnHotReload",
+                HookFlags,
+                null,
+                [typeof(MonoBehaviour)],
+                null
+            );
+            if (hook == null)
+                continue;
+
+            index[t.FullName] = new TypeEntry { Type = t, Hook = hook };
         }
         return index;
     }
