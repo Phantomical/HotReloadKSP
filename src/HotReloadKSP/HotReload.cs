@@ -5,36 +5,6 @@ using System.Reflection;
 
 namespace HotReloadKSP;
 
-public readonly struct ReloadResult(
-    int vesselsTouched,
-    int vesselModulesDestroyed,
-    int vesselModulesReattached,
-    int vesselModulesRestored,
-    int partsTouched,
-    int partModulesDestroyed,
-    int partModulesReattached,
-    int partModulesRestored,
-    int partPrefabsTouched,
-    TimeSpan elapsed
-)
-{
-    public int VesselsTouched { get; } = vesselsTouched;
-    public int VesselModulesDestroyed { get; } = vesselModulesDestroyed;
-    public int VesselModulesReattached { get; } = vesselModulesReattached;
-    public int VesselModulesStateRestored { get; } = vesselModulesRestored;
-    public int PartsTouched { get; } = partsTouched;
-    public int PartModulesDestroyed { get; } = partModulesDestroyed;
-    public int PartModulesReattached { get; } = partModulesReattached;
-    public int PartModulesStateRestored { get; } = partModulesRestored;
-    public int PartPrefabsTouched { get; } = partPrefabsTouched;
-    public TimeSpan Elapsed { get; } = elapsed;
-
-    public override string ToString() =>
-        $"vessels {VesselsTouched} (vm -{VesselModulesDestroyed}/+{VesselModulesReattached}/r{VesselModulesStateRestored}), "
-        + $"parts {PartsTouched} prefabs {PartPrefabsTouched} (pm -{PartModulesDestroyed}/+{PartModulesReattached}/r{PartModulesStateRestored}), "
-        + $"{Elapsed.TotalMilliseconds:F1} ms";
-}
-
 public static class HotReload
 {
     /// <summary>
@@ -42,7 +12,7 @@ public static class HotReload
     /// AssemblyLoader, updates type lookups, and reloads live VesselModule and
     /// PartModule instances. Must be called on the Unity main thread.
     /// </summary>
-    public static ReloadResult Reload(Assembly newAssembly)
+    public static void Reload(Assembly newAssembly)
     {
         if (newAssembly == null)
             throw new ArgumentNullException(nameof(newAssembly));
@@ -52,42 +22,11 @@ public static class HotReload
 
         var oldAssembly = LoadAssembly(newAssembly);
         UpdateTypeLookups(oldAssembly, newAssembly);
-
-        var vm = ReloadVesselModules(oldAssembly, newAssembly);
-        var pm = ReloadPartModules(oldAssembly, newAssembly);
+        ReloadVesselModules(oldAssembly, newAssembly);
+        ReloadPartModules(oldAssembly, newAssembly);
 
         sw.Stop();
-        var result = new ReloadResult(
-            vm.VesselsTouched,
-            vm.Destroyed,
-            vm.Reattached,
-            vm.Restored,
-            pm.PartsTouched,
-            pm.Destroyed,
-            pm.Reattached,
-            pm.Restored,
-            pm.PrefabsTouched,
-            sw.Elapsed
-        );
-        Log.Info("Reload complete: " + result);
-        return result;
-    }
-
-    struct VesselModuleCounts
-    {
-        public int VesselsTouched;
-        public int Destroyed;
-        public int Reattached;
-        public int Restored;
-    }
-
-    struct PartModuleCounts
-    {
-        public int PartsTouched;
-        public int Destroyed;
-        public int Reattached;
-        public int Restored;
-        public int PrefabsTouched;
+        Log.Info($"Reload complete in {sw.Elapsed.TotalMilliseconds:F1} ms");
     }
 
     /// <summary>
@@ -98,9 +37,6 @@ public static class HotReload
     /// </summary>
     static Assembly LoadAssembly(Assembly newAssembly)
     {
-        if (newAssembly == null)
-            throw new ArgumentNullException(nameof(newAssembly));
-
         return AssemblySwap.Swap(newAssembly).OldAssembly;
     }
 
@@ -111,9 +47,6 @@ public static class HotReload
     /// </summary>
     static void UpdateTypeLookups(Assembly oldAssembly, Assembly newAssembly)
     {
-        if (newAssembly == null)
-            throw new ArgumentNullException(nameof(newAssembly));
-
         AssemblyLoader.subclassesOfParentClass.Clear();
         BaseFieldList.reflectedAttributeCache.Clear();
         BaseEventList.reflectedAttributeCache.Clear();
@@ -130,37 +63,14 @@ public static class HotReload
     /// components built from <paramref name="newAssembly"/> and restore KSPField state.
     /// Pass <c>null</c> for <paramref name="oldAssembly"/> on a first-time load.
     /// </summary>
-    static VesselModuleCounts ReloadVesselModules(Assembly oldAssembly, Assembly newAssembly)
+    static void ReloadVesselModules(Assembly oldAssembly, Assembly newAssembly)
     {
-        if (newAssembly == null)
-            throw new ArgumentNullException(nameof(newAssembly));
+        var snapshots =
+            oldAssembly == null
+                ? new List<VesselModuleReloader.ModuleSnapshot>()
+                : VesselModuleReloader.SnapshotAndDetach(oldAssembly);
 
-        List<VesselModuleReloader.ModuleSnapshot> snapshots;
-        int vesselsTouched = 0;
-        int destroyed = 0;
-
-        if (oldAssembly == null)
-        {
-            snapshots = new List<VesselModuleReloader.ModuleSnapshot>();
-        }
-        else
-        {
-            snapshots = VesselModuleReloader.SnapshotAndDetach(
-                oldAssembly,
-                out vesselsTouched,
-                out destroyed
-            );
-        }
-
-        var attachCounts = VesselModuleReloader.ReattachAndRestore(snapshots, newAssembly);
-
-        return new VesselModuleCounts
-        {
-            VesselsTouched = vesselsTouched,
-            Destroyed = destroyed,
-            Reattached = attachCounts.Attached,
-            Restored = attachCounts.Restored,
-        };
+        VesselModuleReloader.ReattachAndRestore(snapshots, newAssembly);
     }
 
     /// <summary>
@@ -170,31 +80,13 @@ public static class HotReload
     /// (prefab-config init followed by a persistent-state overlay). First-time loads skip
     /// the live and prefab sweeps since there is no old assembly to match against.
     /// </summary>
-    static PartModuleCounts ReloadPartModules(Assembly oldAssembly, Assembly newAssembly)
+    static void ReloadPartModules(Assembly oldAssembly, Assembly newAssembly)
     {
-        if (newAssembly == null)
-            throw new ArgumentNullException(nameof(newAssembly));
-
         if (oldAssembly == null)
-            return default;
+            return;
 
-        var snapshots = PartModuleReloader.SnapshotAndDetach(
-            oldAssembly,
-            out int partsTouched,
-            out int destroyed
-        );
-
-        int prefabsTouched = PartModuleReloader.ReloadPrefabs(oldAssembly, newAssembly);
-
-        var attachCounts = PartModuleReloader.ReattachAndRestore(snapshots, newAssembly);
-
-        return new PartModuleCounts
-        {
-            PartsTouched = partsTouched,
-            Destroyed = destroyed,
-            Reattached = attachCounts.Reattached,
-            Restored = attachCounts.Restored,
-            PrefabsTouched = prefabsTouched,
-        };
+        var snapshots = PartModuleReloader.SnapshotAndDetach(oldAssembly);
+        PartModuleReloader.ReloadPrefabs(oldAssembly, newAssembly);
+        PartModuleReloader.ReattachAndRestore(snapshots, newAssembly);
     }
 }

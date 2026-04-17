@@ -14,21 +14,9 @@ internal static class VesselModuleReloader
         public ConfigNode Node;
     }
 
-    internal struct ReattachCounts
-    {
-        public int Attached;
-        public int Restored;
-    }
-
-    public static List<ModuleSnapshot> SnapshotAndDetach(
-        Assembly oldAsm,
-        out int vesselsTouched,
-        out int destroyed
-    )
+    public static List<ModuleSnapshot> SnapshotAndDetach(Assembly oldAsm)
     {
         var snapshots = new List<ModuleSnapshot>();
-        vesselsTouched = 0;
-        destroyed = 0;
 
         if (FlightGlobals.fetch == null || FlightGlobals.Vessels == null)
             return snapshots;
@@ -38,8 +26,6 @@ internal static class VesselModuleReloader
             var v = FlightGlobals.Vessels[i];
             if (v == null || v.gameObject == null)
                 continue;
-
-            bool touched = false;
 
             for (int j = v.vesselModules.Count - 1; j >= 0; j--)
             {
@@ -77,8 +63,6 @@ internal static class VesselModuleReloader
 
                 v.vesselModules.RemoveAt(j);
                 UnityEngine.Object.DestroyImmediate(m);
-                destroyed++;
-                touched = true;
             }
 
             var strayComponents = v.gameObject.GetComponents<VesselModule>();
@@ -90,12 +74,7 @@ internal static class VesselModuleReloader
                 if (c.GetType().Assembly != oldAsm)
                     continue;
                 UnityEngine.Object.DestroyImmediate(c);
-                destroyed++;
-                touched = true;
             }
-
-            if (touched)
-                vesselsTouched++;
         }
 
         return snapshots;
@@ -160,12 +139,10 @@ internal static class VesselModuleReloader
         }
     }
 
-    public static ReattachCounts ReattachAndRestore(List<ModuleSnapshot> snapshots, Assembly newAsm)
+    public static void ReattachAndRestore(List<ModuleSnapshot> snapshots, Assembly newAsm)
     {
-        var counts = new ReattachCounts();
-
         if (FlightGlobals.fetch == null || FlightGlobals.Vessels == null)
-            return counts;
+            return;
 
         var newWrappers = new List<VesselModuleManager.VesselModuleWrapper>();
         for (int i = 0; i < VesselModuleManager.modules.Count; i++)
@@ -208,7 +185,6 @@ internal static class VesselModuleReloader
                 m.Vessel = v;
                 m.enabled = m.ShouldBeActive();
                 v.vesselModules.Add(m);
-                counts.Attached++;
             }
 
             if (!byVessel.TryGetValue(v.persistentId, out var vesselSnaps))
@@ -241,7 +217,6 @@ internal static class VesselModuleReloader
                 try
                 {
                     target.Load(snap.Node);
-                    counts.Restored++;
                 }
                 catch (Exception ex)
                 {
@@ -251,7 +226,5 @@ internal static class VesselModuleReloader
                 }
             }
         }
-
-        return counts;
     }
 }

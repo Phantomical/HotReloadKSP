@@ -16,21 +16,9 @@ internal static class PartModuleReloader
         public ConfigNode PersistentNode;
     }
 
-    internal struct ReattachCounts
-    {
-        public int Reattached;
-        public int Restored;
-    }
-
-    public static List<ModuleSnapshot> SnapshotAndDetach(
-        Assembly oldAsm,
-        out int partsTouched,
-        out int destroyed
-    )
+    public static List<ModuleSnapshot> SnapshotAndDetach(Assembly oldAsm)
     {
         var snapshots = new List<ModuleSnapshot>();
-        partsTouched = 0;
-        destroyed = 0;
 
         if (FlightGlobals.fetch == null || FlightGlobals.Vessels == null)
             return snapshots;
@@ -47,7 +35,6 @@ internal static class PartModuleReloader
                 if (part == null || part.gameObject == null)
                     continue;
 
-                bool partTouched = false;
                 bool pawClosed = false;
 
                 for (int mi = part.Modules.Count - 1; mi >= 0; mi--)
@@ -95,8 +82,6 @@ internal static class PartModuleReloader
 
                     part.Modules.Remove(m);
                     UnityEngine.Object.DestroyImmediate(m);
-                    destroyed++;
-                    partTouched = true;
                 }
 
                 var stray = part.gameObject.GetComponents<PartModule>();
@@ -108,24 +93,17 @@ internal static class PartModuleReloader
                     if (c.GetType().Assembly != oldAsm)
                         continue;
                     UnityEngine.Object.DestroyImmediate(c);
-                    destroyed++;
-                    partTouched = true;
                 }
-
-                if (partTouched)
-                    partsTouched++;
             }
         }
 
         return snapshots;
     }
 
-    public static int ReloadPrefabs(Assembly oldAsm, Assembly newAsm)
+    public static void ReloadPrefabs(Assembly oldAsm, Assembly newAsm)
     {
-        int prefabsTouched = 0;
-
         if (PartLoader.Instance == null || PartLoader.Instance.loadedParts == null)
-            return prefabsTouched;
+            return;
 
         var loaded = PartLoader.Instance.loadedParts;
         for (int i = 0; i < loaded.Count; i++)
@@ -204,23 +182,16 @@ internal static class PartModuleReloader
             }
 
             if (touched)
-            {
                 prefab.ClearModuleReferenceCache();
-                prefabsTouched++;
-            }
         }
-
-        return prefabsTouched;
     }
 
-    public static ReattachCounts ReattachAndRestore(List<ModuleSnapshot> snapshots, Assembly newAsm)
+    public static void ReattachAndRestore(List<ModuleSnapshot> snapshots, Assembly newAsm)
     {
-        var counts = new ReattachCounts();
-
         if (snapshots.Count == 0)
-            return counts;
+            return;
         if (FlightGlobals.fetch == null)
-            return counts;
+            return;
 
         var byPart = new Dictionary<uint, List<ModuleSnapshot>>();
         foreach (var s in snapshots)
@@ -282,12 +253,9 @@ internal static class PartModuleReloader
                 if (added == null)
                     continue;
 
-                counts.Reattached++;
-
                 try
                 {
                     added.Load(snap.PersistentNode);
-                    counts.Restored++;
                 }
                 catch (Exception ex)
                 {
@@ -307,8 +275,6 @@ internal static class PartModuleReloader
 
             part.ClearModuleReferenceCache();
         }
-
-        return counts;
     }
 
     static ConfigNode FindPrefabModuleNode(Part part, PartModule m, int moduleIndex)
