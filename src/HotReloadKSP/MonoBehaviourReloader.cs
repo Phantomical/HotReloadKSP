@@ -14,6 +14,15 @@ internal static class MonoBehaviourReloader
     {
         public Type Type;
         public MethodInfo Hook;
+        public SafeField[] SafeFields;
+    }
+
+    struct SafeField
+    {
+        public FieldInfo Info;
+        // True if FieldType is a MonoBehaviour subclass in the reloading assembly;
+        // such references must be rewritten to the corresponding new component.
+        public bool Remap;
     }
 
     struct Swap
@@ -21,6 +30,8 @@ internal static class MonoBehaviourReloader
         public MonoBehaviour Old;
         public MonoBehaviour New;
         public MethodInfo Hook;
+        public SafeField[] NewFields;
+        public FieldInfo[] OldFields;
         public string TypeName;
     }
 
@@ -29,6 +40,8 @@ internal static class MonoBehaviourReloader
         var newTypes = BuildNewTypeIndex(newAsm);
         if (newTypes.Count == 0)
             return;
+
+        var oldFieldCache = new Dictionary<Type, FieldInfo[]>();
 
         var candidates = CollectCandidates(oldAsm);
         if (candidates.Count == 0)
@@ -90,10 +103,19 @@ internal static class MonoBehaviourReloader
                     Old = oldComp,
                     New = (MonoBehaviour)newComp,
                     Hook = entry.Hook,
+                    NewFields = entry.SafeFields,
+                    OldFields = GetOldFields(oldType, entry.SafeFields, oldFieldCache),
                     TypeName = typeName,
                 }
             );
         }
+
+        var remap = new Dictionary<MonoBehaviour, MonoBehaviour>(swaps.Count);
+        foreach (var s in swaps)
+            remap[s.Old] = s.New;
+
+        foreach (var s in swaps)
+            CopyFields(s, remap);
 
         foreach (var s in swaps)
         {
@@ -130,6 +152,132 @@ internal static class MonoBehaviourReloader
 
             Log.Info($"Hot-reloaded MonoBehaviour {s.TypeName}");
         }
+    }
+
+    static void CopyFields(Swap s, Dictionary<MonoBehaviour, MonoBehaviour> remap)
+    {
+        for (int i = 0; i < s.NewFields.Length; i++)
+        {
+            var oldField = s.OldFields[i];
+            if (oldField == null)
+                continue;
+            var safe = s.NewFields[i];
+            try
+            {
+                var value = oldField.GetValue(s.Old);
+                if (safe.Remap && value != null)
+                {
+                    var oldRef = (MonoBehaviour)value;
+                    if (remap.TryGetValue(oldRef, out var newRef))
+                    {
+                        value = newRef;
+                    }
+                    else
+                    {
+                        Log.Warn(
+                            $"Field {safe.Info.Name} on {s.TypeName} referenced an unswapped {oldRef.GetType().FullName}; setting to null"
+                        );
+                        value = null;
+                    }
+                }
+                safe.Info.SetValue(s.New, value);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"Failed to copy field {safe.Info.Name} on {s.TypeName}");
+                Log.LogException(ex);
+            }
+        }
+    }
+
+    static FieldInfo[] GetOldFields(
+        Type oldType,
+        SafeField[] newFields,
+        Dictionary<Type, FieldInfo[]> cache
+    )
+    {
+        if (cache.TryGetValue(oldType, out var cached))
+            return cached;
+
+        var result = new FieldInfo[newFields.Length];
+        for (int i = 0; i < newFields.Length; i++)
+            result[i] = FindInstanceField(oldType, newFields[i].Info.Name);
+
+        cache[oldType] = result;
+        return result;
+    }
+
+    static FieldInfo FindInstanceField(Type t, string name)
+    {
+        const BindingFlags flags =
+            BindingFlags.Instance
+            | BindingFlags.Public
+            | BindingFlags.NonPublic
+            | BindingFlags.DeclaredOnly;
+
+        while (t != null && t != typeof(MonoBehaviour))
+        {
+            var f = t.GetField(name, flags);
+            if (f != null)
+                return f;
+            t = t.BaseType;
+        }
+        return null;
+    }
+
+    static SafeField[] CollectSafeFields(Type newType, Assembly reloadingAsm)
+    {
+        const BindingFlags flags =
+            BindingFlags.Instance
+            | BindingFlags.Public
+            | BindingFlags.NonPublic
+            | BindingFlags.DeclaredOnly;
+
+        var fields = new List<SafeField>();
+        var t = newType;
+        while (t != null && t != typeof(MonoBehaviour))
+        {
+            foreach (var f in t.GetFields(flags))
+            {
+                if (f.IsStatic)
+                    continue;
+
+                var ft = f.FieldType;
+                if (InvolvesAssembly(ft, reloadingAsm))
+                {
+                    // A direct MonoBehaviour-typed reference to a reloading type can be
+                    // remapped to the new component; anything else (non-MonoBehaviour
+                    // reloading types, containers of reloading types) stays skipped.
+                    if (
+                        ft.Assembly == reloadingAsm
+                        && typeof(MonoBehaviour).IsAssignableFrom(ft)
+                    )
+                        fields.Add(new SafeField { Info = f, Remap = true });
+                    continue;
+                }
+
+                fields.Add(new SafeField { Info = f, Remap = false });
+            }
+            t = t.BaseType;
+        }
+        return fields.ToArray();
+    }
+
+    static bool InvolvesAssembly(Type t, Assembly asm)
+    {
+        if (t == null)
+            return false;
+        if (t.Assembly == asm)
+            return true;
+        if (t.HasElementType)
+            return InvolvesAssembly(t.GetElementType(), asm);
+        if (t.IsGenericType)
+        {
+            foreach (var arg in t.GetGenericArguments())
+                if (InvolvesAssembly(arg, asm))
+                    return true;
+        }
+        return false;
     }
 
     static void SafeSetActive(GameObject go, bool value, string context)
@@ -184,7 +332,12 @@ internal static class MonoBehaviourReloader
             if (hook == null)
                 continue;
 
-            index[t.FullName] = new TypeEntry { Type = t, Hook = hook };
+            index[t.FullName] = new TypeEntry
+            {
+                Type = t,
+                Hook = hook,
+                SafeFields = CollectSafeFields(t, newAsm),
+            };
         }
         return index;
     }
