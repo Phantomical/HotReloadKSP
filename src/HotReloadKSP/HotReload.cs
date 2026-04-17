@@ -24,6 +24,7 @@ public static class HotReload
         UpdateTypeLookups(oldAssembly, newAssembly);
         ReloadVesselModules(oldAssembly, newAssembly);
         ReloadPartModules(oldAssembly, newAssembly);
+        ReloadScenarioModules(oldAssembly, newAssembly);
 
         sw.Stop();
         Log.Info($"Reload complete in {sw.Elapsed.TotalMilliseconds:F1} ms");
@@ -66,9 +67,7 @@ public static class HotReload
     static void ReloadVesselModules(Assembly oldAssembly, Assembly newAssembly)
     {
         var snapshots =
-            oldAssembly == null
-                ? new List<VesselModuleReloader.ModuleSnapshot>()
-                : VesselModuleReloader.SnapshotAndDetach(oldAssembly);
+            oldAssembly == null ? [] : VesselModuleReloader.SnapshotAndDetach(oldAssembly);
 
         VesselModuleReloader.ReattachAndRestore(snapshots, newAssembly);
     }
@@ -88,5 +87,21 @@ public static class HotReload
         var snapshots = PartModuleReloader.SnapshotAndDetach(oldAssembly);
         PartModuleReloader.ReloadPrefabs(oldAssembly, newAssembly);
         PartModuleReloader.ReattachAndRestore(snapshots, newAssembly);
+    }
+
+    /// <summary>
+    /// Snapshot every live <see cref="ScenarioModule"/> whose type comes from
+    /// <paramref name="oldAssembly"/>, destroy the old components, then re-add fresh
+    /// components built from <paramref name="newAssembly"/> and restore KSPField state.
+    /// Also relinks the corresponding <see cref="ProtoScenarioModule"/> entries so scene
+    /// transitions persist the new instances. Skips on first-time loads.
+    /// </summary>
+    static void ReloadScenarioModules(Assembly oldAssembly, Assembly newAssembly)
+    {
+        if (oldAssembly == null)
+            return;
+
+        var snapshots = ScenarioModuleReloader.SnapshotAndDetach(oldAssembly);
+        ScenarioModuleReloader.ReattachAndRestore(snapshots, newAssembly);
     }
 }
