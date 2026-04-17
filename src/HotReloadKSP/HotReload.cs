@@ -98,7 +98,7 @@ public static class HotReload
         {
             if (la?.assembly == null)
                 continue;
-            if (la.assembly.GetName().Name != simpleName)
+            if (la.name != simpleName)
                 continue;
             return la.assembly == newAssembly;
         }

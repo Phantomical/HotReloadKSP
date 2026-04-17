@@ -17,10 +17,13 @@ internal static class AssemblySwap
 
     public static Result Swap(Assembly newAsm, string targetName)
     {
+        // Match on LoadedAssembly.name, not la.assembly.GetName().Name: after a
+        // prior reload the runtime Assembly's simple name is the rewritten
+        // "-HR<guid>" form, while la.name keeps the original simple name.
         AssemblyLoader.LoadedAssembly existing = null;
         foreach (var la in AssemblyLoader.loadedAssemblies)
         {
-            if (la?.assembly != null && la.assembly.GetName().Name == targetName)
+            if (la?.assembly != null && la.name == targetName)
             {
                 existing = la;
                 break;

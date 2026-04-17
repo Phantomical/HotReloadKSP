@@ -116,7 +116,10 @@ internal static class DebugUIManager
         {
             var inputFieldGo = bottomBar.Find("InputField");
             if (inputFieldGo != null)
-                _inputFieldPrefab = ClonePrefab(inputFieldGo.gameObject, "DebugUI_InputFieldPrefab");
+                _inputFieldPrefab = ClonePrefab(
+                    inputFieldGo.gameObject,
+                    "DebugUI_InputFieldPrefab"
+                );
         }
 
         if (_buttonPrefab == null)
