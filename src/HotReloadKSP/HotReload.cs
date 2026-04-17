@@ -25,6 +25,7 @@ public static class HotReload
         ReloadVesselModules(oldAssembly, newAssembly);
         ReloadPartModules(oldAssembly, newAssembly);
         ReloadScenarioModules(oldAssembly, newAssembly);
+        ReloadMonoBehaviours(oldAssembly, newAssembly);
 
         sw.Stop();
         Log.Info($"Reload complete in {sw.Elapsed.TotalMilliseconds:F1} ms");
@@ -103,5 +104,19 @@ public static class HotReload
 
         var snapshots = ScenarioModuleReloader.SnapshotAndDetach(oldAssembly);
         ScenarioModuleReloader.ReattachAndRestore(snapshots, newAssembly);
+    }
+
+    /// <summary>
+    /// Swap live MonoBehaviour components whose type is in <paramref name="oldAssembly"/> and
+    /// whose new-assembly counterpart declares an <c>OnHotReload(MonoBehaviour prev)</c> instance
+    /// method. Components of KSP-handled types (VesselModule, PartModule, ScenarioModule) are
+    /// skipped here because earlier stages already dealt with them. Skipped on first-time loads.
+    /// </summary>
+    static void ReloadMonoBehaviours(Assembly oldAssembly, Assembly newAssembly)
+    {
+        if (oldAssembly == null)
+            return;
+
+        MonoBehaviourReloader.Reload(oldAssembly, newAssembly);
     }
 }
