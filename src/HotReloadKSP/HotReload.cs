@@ -26,6 +26,8 @@ public static class HotReload
         ReloadPartModules(oldAssembly, newAssembly);
         ReloadScenarioModules(oldAssembly, newAssembly);
         ReloadMonoBehaviours(oldAssembly, newAssembly);
+        InvokeStaticHotUnloadHooks(oldAssembly);
+        InvokeStaticHotLoadHooks(newAssembly);
 
         sw.Stop();
         Log.Info($"Reload complete in {sw.Elapsed.TotalMilliseconds:F1} ms");
@@ -118,5 +120,82 @@ public static class HotReload
             return;
 
         MonoBehaviourReloader.Reload(oldAssembly, newAssembly);
+    }
+
+    /// <summary>
+    /// Invoke <c>static void OnHotUnload()</c> on every type in <paramref name="oldAssembly"/>
+    /// that declares one. Runs before the new assembly's reload hooks so old-assembly types
+    /// can tear down static state (caches, event subscriptions) before being stranded.
+    /// No-op on first-time loads.
+    /// </summary>
+    static void InvokeStaticHotUnloadHooks(Assembly oldAssembly)
+    {
+        if (oldAssembly == null)
+            return;
+        InvokeStaticHooks(oldAssembly, "OnHotUnload");
+    }
+
+    /// <summary>
+    /// Invoke <c>static void OnHotLoad()</c> on every type in <paramref name="newAssembly"/>
+    /// that declares one. Runs after live component swaps and after old-assembly unload hooks
+    /// so new hooks observe the fully-swapped scene with old static state torn down.
+    /// Exceptions from individual hooks are logged but do not abort the sweep.
+    /// </summary>
+    static void InvokeStaticHotLoadHooks(Assembly newAssembly)
+    {
+        InvokeStaticHooks(newAssembly, "OnHotLoad");
+    }
+
+    static void InvokeStaticHooks(Assembly asm, string methodName)
+    {
+        Type[] types;
+        try
+        {
+            types = asm.GetTypes();
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            types = ex.Types;
+        }
+
+        const BindingFlags flags =
+            BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+
+        for (int i = 0; i < types.Length; i++)
+        {
+            var t = types[i];
+            if (t == null)
+                continue;
+
+            MethodInfo hook;
+            try
+            {
+                hook = t.GetMethod(methodName, flags, null, Type.EmptyTypes, null);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"GetMethod({methodName}) threw for {t.FullName}");
+                Log.LogException(ex);
+                continue;
+            }
+
+            if (hook == null)
+                continue;
+
+            try
+            {
+                hook.Invoke(null, null);
+            }
+            catch (TargetInvocationException tie)
+            {
+                Log.Error($"{methodName} threw for {t.FullName}");
+                Log.LogException(tie.InnerException ?? tie);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"{methodName} threw for {t.FullName}");
+                Log.LogException(ex);
+            }
+        }
     }
 }
