@@ -43,8 +43,9 @@ internal static class VesselModuleReloader
                 catch (Exception ex)
                 {
                     Log.Warn(
-                        $"Save threw for {m.GetType().FullName} on vessel {v.vesselName}: {ex}"
+                        $"Save threw for {m.GetType().FullName} on vessel {v.vesselName}"
                     );
+                    Log.LogException(ex);
                 }
 
                 snapshots.Add(
@@ -127,7 +128,8 @@ internal static class VesselModuleReloader
             }
             catch (Exception ex)
             {
-                Log.Error($"Failed to register VesselModule {t.FullName}: {ex}");
+                Log.Error($"Failed to register VesselModule {t.FullName}");
+                Log.LogException(ex);
             }
         }
     }
@@ -211,8 +213,9 @@ internal static class VesselModuleReloader
                 catch (Exception ex)
                 {
                     Log.Error(
-                        $"Load threw for {snap.TypeName} on vessel {v.vesselName}: {ex}"
+                        $"Load threw for {snap.TypeName} on vessel {v.vesselName}"
                     );
+                    Log.LogException(ex);
                 }
             }
         }

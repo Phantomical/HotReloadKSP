@@ -60,8 +60,9 @@ internal static class PartModuleReloader
                     catch (Exception ex)
                     {
                         Log.Warn(
-                            $"Save threw for {m.GetType().FullName} on part {part.partInfo?.name}: {ex}"
+                            $"Save threw for {m.GetType().FullName} on part {part.partInfo?.name}"
                         );
+                        Log.LogException(ex);
                     }
 
                     snapshots.Add(
@@ -153,8 +154,9 @@ internal static class PartModuleReloader
                 catch (Exception ex)
                 {
                     Log.Error(
-                        $"AddModule threw during prefab rebuild for {ap.name}/{name}: {ex}"
+                        $"AddModule threw during prefab rebuild for {ap.name}/{name}"
                     );
+                    Log.LogException(ex);
                     continue;
                 }
 
@@ -220,8 +222,9 @@ internal static class PartModuleReloader
                 catch (Exception ex)
                 {
                     Log.Error(
-                        $"AddModule threw for {snap.ModuleName} on part {part.partInfo?.name}: {ex}"
+                        $"AddModule threw for {snap.ModuleName} on part {part.partInfo?.name}"
                     );
+                    Log.LogException(ex);
                     continue;
                 }
 
@@ -235,8 +238,9 @@ internal static class PartModuleReloader
                 catch (Exception ex)
                 {
                     Log.Error(
-                        $"Load threw for {snap.ModuleName} on part {part.partInfo?.name}: {ex}"
+                        $"Load threw for {snap.ModuleName} on part {part.partInfo?.name}"
                     );
+                    Log.LogException(ex);
                 }
 
                 int target = Mathf.Clamp(snap.ModuleIndex, 0, part.Modules.Count - 1);

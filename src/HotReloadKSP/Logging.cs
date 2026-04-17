@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 
 namespace HotReloadKSP;
@@ -11,4 +12,6 @@ internal static class Log
     public static void Warn(string msg) => Debug.LogWarning(Prefix + msg);
 
     public static void Error(string msg) => Debug.LogError(Prefix + msg);
+
+    public static void LogException(Exception ex) => Debug.LogException(ex);
 }

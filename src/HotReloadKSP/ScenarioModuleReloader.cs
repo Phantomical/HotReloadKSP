@@ -39,7 +39,8 @@ internal static class ScenarioModuleReloader
             }
             catch (Exception ex)
             {
-                Log.Warn($"Save threw for ScenarioModule {m.GetType().FullName}: {ex}");
+                Log.Warn($"Save threw for ScenarioModule {m.GetType().FullName}");
+                Log.LogException(ex);
             }
 
             snapshots.Add(
@@ -93,7 +94,8 @@ internal static class ScenarioModuleReloader
             }
             catch (Exception ex)
             {
-                Log.Error($"AddModule threw for ScenarioModule {snap.ClassName}: {ex}");
+                Log.Error($"AddModule threw for ScenarioModule {snap.ClassName}");
+                Log.LogException(ex);
                 continue;
             }
 

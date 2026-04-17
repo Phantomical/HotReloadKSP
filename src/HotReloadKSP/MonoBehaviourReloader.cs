@@ -77,7 +77,8 @@ internal static class MonoBehaviourReloader
             }
             catch (Exception ex)
             {
-                Log.Error($"AddComponent threw for {typeName}: {ex}");
+                Log.Error($"AddComponent threw for {typeName}");
+                Log.LogException(ex);
                 continue;
             }
 
@@ -106,11 +107,13 @@ internal static class MonoBehaviourReloader
             }
             catch (TargetInvocationException tie)
             {
-                Log.Error($"OnHotReload threw for {s.TypeName}: {tie.InnerException ?? tie}");
+                Log.Error($"OnHotReload threw for {s.TypeName}");
+                Log.LogException(tie.InnerException ?? tie);
             }
             catch (Exception ex)
             {
-                Log.Error($"OnHotReload threw for {s.TypeName}: {ex}");
+                Log.Error($"OnHotReload threw for {s.TypeName}");
+                Log.LogException(ex);
             }
         }
 
@@ -125,7 +128,8 @@ internal static class MonoBehaviourReloader
             }
             catch (Exception ex)
             {
-                Log.Error($"DestroyImmediate threw for old {s.TypeName}: {ex}");
+                Log.Error($"DestroyImmediate threw for old {s.TypeName}");
+                Log.LogException(ex);
             }
 
             Log.Info($"Hot-reloaded MonoBehaviour {s.TypeName}");
@@ -142,7 +146,8 @@ internal static class MonoBehaviourReloader
         }
         catch (Exception ex)
         {
-            Log.Error($"SetActive({value}) threw during MonoBehaviour reload ({context}): {ex}");
+            Log.Error($"SetActive({value}) threw during MonoBehaviour reload ({context})");
+            Log.LogException(ex);
         }
     }
 
