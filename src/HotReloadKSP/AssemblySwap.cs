@@ -13,9 +13,10 @@ internal static class AssemblySwap
         public bool WasFirstLoad;
     }
 
-    public static Result Swap(Assembly newAsm)
+    public static Result Swap(Assembly newAsm) => Swap(newAsm, newAsm.GetName().Name);
+
+    public static Result Swap(Assembly newAsm, string targetName)
     {
-        var targetName = newAsm.GetName().Name;
         AssemblyLoader.LoadedAssembly existing = null;
         foreach (var la in AssemblyLoader.loadedAssemblies)
         {

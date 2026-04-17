@@ -19,43 +19,21 @@ public static class HotReload
 
         var dllBytes = File.ReadAllBytes(path);
 
-        // Unity's Mono caches Assembly.Load results by assembly identity (simple
-        // name + version + culture + public key). Rebuilding the same project
-        // assigns a fresh MVID but keeps the same AssemblyVersion, so a plain
-        // Assembly.Load(bytes) returns the already-loaded Assembly instance and
-        // the reload short-circuits in the IsAlreadyLoaded guard below. Rewrite
-        // the incoming image with Cecil to give it a unique identity (bumped
-        // Revision + fresh module MVID) so Mono treats it as a new assembly.
+        // Unity's Mono dedupes Assembly.Load by simple name alone — if an
+        // assembly with the same simple name is already loaded, the given bytes
+        // are ignored and the existing Assembly instance is returned, even when
+        // AssemblyVersion and MVID differ. Bumping identity fields isn't enough,
+        // so rewrite the incoming image with a unique simple name so Mono must
+        // treat it as a new assembly. The original simple name is passed through
+        // to AssemblySwap so the existing AssemblyLoader entry (and everything
+        // that looks it up by name) can still be found.
         //
         // PDB rewriting is skipped: KSP's bundled Mono.Cecil is too old to
         // include a concrete symbol provider, so reloaded assemblies don't carry
         // debug info. The originally-loaded assembly keeps its PDB; only the
         // hot-reloaded image loses line numbers in stack traces.
-        dllBytes = RewriteIdentity(dllBytes);
-
-        Reload(Assembly.Load(dllBytes));
-    }
-
-    static byte[] RewriteIdentity(byte[] dllBytes)
-    {
-        using var dllIn = new MemoryStream(dllBytes, writable: false);
-        var asmDef = AssemblyDefinition.ReadAssembly(
-            dllIn,
-            new ReaderParameters { ReadSymbols = false }
-        );
-
-        var oldVer = asmDef.Name.Version ?? new Version(0, 0, 0, 0);
-        asmDef.Name.Version = new Version(
-            oldVer.Major,
-            oldVer.Minor,
-            oldVer.Build < 0 ? 0 : oldVer.Build,
-            unchecked((ushort)Environment.TickCount)
-        );
-        asmDef.MainModule.Mvid = Guid.NewGuid();
-
-        using var dllOut = new MemoryStream();
-        asmDef.Write(dllOut);
-        return dllOut.ToArray();
+        var (rewritten, originalName) = RewriteIdentity(dllBytes);
+        ReloadCore(Assembly.Load(rewritten), originalName);
     }
 
     /// <summary>
@@ -68,18 +46,23 @@ public static class HotReload
         if (newAssembly == null)
             throw new ArgumentNullException(nameof(newAssembly));
 
-        if (IsAlreadyLoaded(newAssembly))
+        ReloadCore(newAssembly, newAssembly.GetName().Name);
+    }
+
+    static void ReloadCore(Assembly newAssembly, string targetSimpleName)
+    {
+        if (IsAlreadyLoaded(newAssembly, targetSimpleName))
         {
             Log.Info(
-                $"Skipping reload of {newAssembly.GetName().Name}: identical Assembly instance already loaded"
+                $"Skipping reload of {targetSimpleName}: identical Assembly instance already loaded"
             );
             return;
         }
 
         var sw = Stopwatch.StartNew();
-        Log.Info($"Reloading {newAssembly.GetName().Name}");
+        Log.Info($"Reloading {targetSimpleName}");
 
-        var oldAssembly = LoadAssembly(newAssembly);
+        var oldAssembly = AssemblySwap.Swap(newAssembly, targetSimpleName).OldAssembly;
         UpdateTypeLookups(oldAssembly, newAssembly);
         ReloadVesselModules(oldAssembly, newAssembly);
         ReloadPartModules(oldAssembly, newAssembly);
@@ -92,25 +75,30 @@ public static class HotReload
         Log.Info($"Reload complete in {sw.Elapsed.TotalMilliseconds:F1} ms");
     }
 
-    /// <summary>
-    /// Install <paramref name="newAssembly"/> into <see cref="AssemblyLoader.loadedAssemblies"/>.
-    /// If an entry with the same simple name already exists, the entry is mutated in place
-    /// (keeping object identity) and the previously-loaded <see cref="Assembly"/> is returned.
-    /// Returns <c>null</c> on first load.
-    /// </summary>
-    static Assembly LoadAssembly(Assembly newAssembly)
+    static (byte[] bytes, string originalName) RewriteIdentity(byte[] dllBytes)
     {
-        return AssemblySwap.Swap(newAssembly).OldAssembly;
+        using var dllIn = new MemoryStream(dllBytes, writable: false);
+        var asmDef = AssemblyDefinition.ReadAssembly(
+            dllIn,
+            new ReaderParameters { ReadSymbols = false }
+        );
+
+        var originalName = asmDef.Name.Name;
+        asmDef.Name.Name = $"{originalName}-HR{Guid.NewGuid():N}";
+        asmDef.MainModule.Mvid = Guid.NewGuid();
+
+        using var dllOut = new MemoryStream();
+        asmDef.Write(dllOut);
+        return (dllOut.ToArray(), originalName);
     }
 
-    static bool IsAlreadyLoaded(Assembly newAssembly)
+    static bool IsAlreadyLoaded(Assembly newAssembly, string simpleName)
     {
-        var name = newAssembly.GetName().Name;
         foreach (var la in AssemblyLoader.loadedAssemblies)
         {
             if (la?.assembly == null)
                 continue;
-            if (la.assembly.GetName().Name != name)
+            if (la.assembly.GetName().Name != simpleName)
                 continue;
             return la.assembly == newAssembly;
         }
