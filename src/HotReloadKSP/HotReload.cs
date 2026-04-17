@@ -1,12 +1,36 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Reflection;
 
 namespace HotReloadKSP;
 
 public static class HotReload
 {
+    /// <summary>
+    /// Load the assembly at <paramref name="path"/> from disk bytes and reload it.
+    /// Reads the file into memory and hands it to <see cref="Assembly.Load(byte[])"/>
+    /// so repeated calls against the same path bypass the <see cref="Assembly.LoadFrom(string)"/>
+    /// identity cache — without this, the second call would return the originally-loaded
+    /// Assembly instance and the reload would be a destructive no-op (caches cleared and
+    /// live components destroyed, then rebuilt against the same old types).
+    /// A sibling <c>.pdb</c> is loaded alongside when present so debuggers keep working.
+    /// </summary>
+    public static void Reload(string path)
+    {
+        if (path == null)
+            throw new ArgumentNullException(nameof(path));
+
+        var bytes = File.ReadAllBytes(path);
+        var pdbPath = Path.ChangeExtension(path, ".pdb");
+        var asm = File.Exists(pdbPath)
+            ? Assembly.Load(bytes, File.ReadAllBytes(pdbPath))
+            : Assembly.Load(bytes);
+
+        Reload(asm);
+    }
+
     /// <summary>
     /// Orchestrates a full reload: swaps <paramref name="newAssembly"/> into KSP's
     /// AssemblyLoader, updates type lookups, and reloads live VesselModule and
@@ -16,6 +40,14 @@ public static class HotReload
     {
         if (newAssembly == null)
             throw new ArgumentNullException(nameof(newAssembly));
+
+        if (IsAlreadyLoaded(newAssembly))
+        {
+            Log.Info(
+                $"Skipping reload of {newAssembly.GetName().Name}: identical Assembly instance already loaded"
+            );
+            return;
+        }
 
         var sw = Stopwatch.StartNew();
         Log.Info($"Reloading {newAssembly.GetName().Name}");
@@ -42,6 +74,20 @@ public static class HotReload
     static Assembly LoadAssembly(Assembly newAssembly)
     {
         return AssemblySwap.Swap(newAssembly).OldAssembly;
+    }
+
+    static bool IsAlreadyLoaded(Assembly newAssembly)
+    {
+        var name = newAssembly.GetName().Name;
+        foreach (var la in AssemblyLoader.loadedAssemblies)
+        {
+            if (la?.assembly == null)
+                continue;
+            if (la.assembly.GetName().Name != name)
+                continue;
+            return la.assembly == newAssembly;
+        }
+        return false;
     }
 
     /// <summary>
