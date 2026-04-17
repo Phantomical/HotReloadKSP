@@ -15,14 +15,6 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
 
-    <Reference Include="HarmonyKSP">
-      <HintPath>$(DepSet1)/000_Harmony/0Harmony.dll</HintPath>
-      <Private>false</Private>
-      <KSPAssemblyName>HarmonyKSP</KSPAssemblyName>
-      <KSPAssemblyVersion>0.0.0</KSPAssemblyVersion>
-      <GenerateDependencyAttribute>true</GenerateDependencyAttribute>
-    </Reference>
-
     <KSPVersionFile Include=".">
       <Destination>$(GameDataOutDir)/HotReloadKSP.version</Destination>
       <URL>https://github.com/Phantomical/HotReloadKSP/releases/latest/download/HotReloadKSP.version</URL>
