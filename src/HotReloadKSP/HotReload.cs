@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using Mono.Cecil;
 
 namespace HotReloadKSP;
 
@@ -10,25 +11,51 @@ public static class HotReload
 {
     /// <summary>
     /// Load the assembly at <paramref name="path"/> from disk bytes and reload it.
-    /// Reads the file into memory and hands it to <see cref="Assembly.Load(byte[])"/>
-    /// so repeated calls against the same path bypass the <see cref="Assembly.LoadFrom(string)"/>
-    /// identity cache — without this, the second call would return the originally-loaded
-    /// Assembly instance and the reload would be a destructive no-op (caches cleared and
-    /// live components destroyed, then rebuilt against the same old types).
-    /// A sibling <c>.pdb</c> is loaded alongside when present so debuggers keep working.
     /// </summary>
     public static void Reload(string path)
     {
         if (path == null)
             throw new ArgumentNullException(nameof(path));
 
-        var bytes = File.ReadAllBytes(path);
-        var pdbPath = Path.ChangeExtension(path, ".pdb");
-        var asm = File.Exists(pdbPath)
-            ? Assembly.Load(bytes, File.ReadAllBytes(pdbPath))
-            : Assembly.Load(bytes);
+        var dllBytes = File.ReadAllBytes(path);
 
-        Reload(asm);
+        // Unity's Mono caches Assembly.Load results by assembly identity (simple
+        // name + version + culture + public key). Rebuilding the same project
+        // assigns a fresh MVID but keeps the same AssemblyVersion, so a plain
+        // Assembly.Load(bytes) returns the already-loaded Assembly instance and
+        // the reload short-circuits in the IsAlreadyLoaded guard below. Rewrite
+        // the incoming image with Cecil to give it a unique identity (bumped
+        // Revision + fresh module MVID) so Mono treats it as a new assembly.
+        //
+        // PDB rewriting is skipped: KSP's bundled Mono.Cecil is too old to
+        // include a concrete symbol provider, so reloaded assemblies don't carry
+        // debug info. The originally-loaded assembly keeps its PDB; only the
+        // hot-reloaded image loses line numbers in stack traces.
+        dllBytes = RewriteIdentity(dllBytes);
+
+        Reload(Assembly.Load(dllBytes));
+    }
+
+    static byte[] RewriteIdentity(byte[] dllBytes)
+    {
+        using var dllIn = new MemoryStream(dllBytes, writable: false);
+        var asmDef = AssemblyDefinition.ReadAssembly(
+            dllIn,
+            new ReaderParameters { ReadSymbols = false }
+        );
+
+        var oldVer = asmDef.Name.Version ?? new Version(0, 0, 0, 0);
+        asmDef.Name.Version = new Version(
+            oldVer.Major,
+            oldVer.Minor,
+            oldVer.Build < 0 ? 0 : oldVer.Build,
+            unchecked((ushort)Environment.TickCount)
+        );
+        asmDef.MainModule.Mvid = Guid.NewGuid();
+
+        using var dllOut = new MemoryStream();
+        asmDef.Write(dllOut);
+        return dllOut.ToArray();
     }
 
     /// <summary>
