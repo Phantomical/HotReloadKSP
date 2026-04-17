@@ -20,6 +20,7 @@ internal static class MonoBehaviourReloader
     struct SafeField
     {
         public FieldInfo Info;
+
         // True if FieldType is a MonoBehaviour subclass in the reloading assembly;
         // such references must be rewritten to the corresponding new component.
         public bool Remap;
@@ -119,6 +120,8 @@ internal static class MonoBehaviourReloader
 
         foreach (var s in swaps)
         {
+            if (s.Hook == null)
+                continue;
             try
             {
                 s.Hook.Invoke(s.New, [s.Old]);
@@ -248,10 +251,7 @@ internal static class MonoBehaviourReloader
                     // A direct MonoBehaviour-typed reference to a reloading type can be
                     // remapped to the new component; anything else (non-MonoBehaviour
                     // reloading types, containers of reloading types) stays skipped.
-                    if (
-                        ft.Assembly == reloadingAsm
-                        && typeof(MonoBehaviour).IsAssignableFrom(ft)
-                    )
+                    if (ft.Assembly == reloadingAsm && typeof(MonoBehaviour).IsAssignableFrom(ft))
                         fields.Add(new SafeField { Info = f, Remap = true });
                     continue;
                 }
@@ -322,15 +322,7 @@ internal static class MonoBehaviourReloader
             if (t.FullName == null)
                 continue;
 
-            var hook = t.GetMethod(
-                "OnHotReload",
-                HookFlags,
-                null,
-                [typeof(MonoBehaviour)],
-                null
-            );
-            if (hook == null)
-                continue;
+            var hook = t.GetMethod("OnHotReload", HookFlags, null, [typeof(MonoBehaviour)], null);
 
             index[t.FullName] = new TypeEntry
             {

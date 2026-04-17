@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
@@ -170,10 +169,11 @@ public static class HotReload
     }
 
     /// <summary>
-    /// Swap live MonoBehaviour components whose type is in <paramref name="oldAssembly"/> and
-    /// whose new-assembly counterpart declares an <c>OnHotReload(MonoBehaviour prev)</c> instance
-    /// method. Components of KSP-handled types (VesselModule, PartModule, ScenarioModule) are
-    /// skipped here because earlier stages already dealt with them. Skipped on first-time loads.
+    /// Swap live MonoBehaviour components whose type is in <paramref name="oldAssembly"/> to the
+    /// matching new-assembly type. Fields are copied across and, if the new type declares
+    /// <c>OnHotReload(MonoBehaviour prev)</c>, it is invoked so the mod can do custom migration.
+    /// Components of KSP-handled types (VesselModule, PartModule, ScenarioModule) are skipped
+    /// here because earlier stages already dealt with them. Skipped on first-time loads.
     /// </summary>
     static void ReloadMonoBehaviours(Assembly oldAssembly, Assembly newAssembly)
     {
