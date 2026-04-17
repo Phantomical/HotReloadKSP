@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Hot reload support for KSP mods</Description>
+
+    <KSPBT_ModRoot>$(GameDataOutDir)</KSPBT_ModRoot>
+    <KSPBT_ModPluginFolder>Plugins</KSPBT_ModPluginFolder>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="KSPBuildTools" Version="1.1.0" />
+
+    <PackageReference Include="JsonPoke" Version="1.2.0" />
+    <PackageReference Include="Krafs.Publicizer" Version="2.3.0">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+
+    <Reference Include="HarmonyKSP">
+      <HintPath>$(DepSet1)/000_Harmony/0Harmony.dll</HintPath>
+      <Private>false</Private>
+      <KSPAssemblyName>HarmonyKSP</KSPAssemblyName>
+      <KSPAssemblyVersion>0.0.0</KSPAssemblyVersion>
+      <GenerateDependencyAttribute>true</GenerateDependencyAttribute>
+    </Reference>
+
+    <KSPVersionFile Include=".">
+      <Destination>$(GameDataOutDir)/HotReloadKSP.version</Destination>
+      <URL>https://github.com/Phantomical/HotReloadKSP/releases/latest/download/HotReloadKSP.version</URL>
+      <Download>https://github.com/Phantomical/HotReloadKSP/releases/latest</Download>
+    </KSPVersionFile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Publicize Include="Assembly-CSharp" />
+  </ItemGroup>
+
+  <!--
+    It's really easy for old binaries to stick around in GameData and bin
+    directories. This step makes sure that doesn't happen.
+  -->
+  <Target Name="GameDataPostClean" AfterTargets="Clean">
+    <RemoveDir Directories="$(GameDataOutDir)" />
+    <MakeDir Directories="$(GameDataOutDir)" />
+  </Target>
+
+  <Target Name="CopyUnityAssets" AfterTargets="CopyFilesToOutputDirectory">
+    <ItemGroup>
+      <Patches Include="$(ProjectRootDir)\src\GameData\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(Patches)" DestinationFolder="$(GameDataOutDir)\%(RecursiveDir)" />
+  </Target>
+
+  <Target Name="CopyExtrasToPluginFolder" AfterTargets="KSPBT_CopyDLLsToPluginFolder">
+    <ItemGroup>
+      <_ExtrasToCopy Include="$(TargetDir)/**/*.pdb" />
+      <_ExtrasToCopy Include="$(TargetDir)/**/*.xml" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(_ExtrasToCopy)" DestinationFolder="$(KSPBT_ModRoot)/$(KSPBT_ModPluginFolder)/%(RecursiveDir)" />
+  </Target>
+</Project>

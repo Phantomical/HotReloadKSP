@@ -1,0 +1,81 @@
+# Contributing
+
+## Bug Reports
+If you are reporting a bug please make sure to include KSP.log and/or Player.log
+along with your current mod list. For best results, follow the instructions at
+[How to Get Support][0].
+
+[0]: https://forum.kerbalspaceprogram.com/topic/163863-how-to-get-support/
+
+## Installing Dependencies
+HotReloadKSP has integrations with some other mods. You don't necessarily want
+to always install these on the KSP installation you're referencing so
+HotReloadKSP provides a script to automatically download and install them under
+`deps`. You will need to run one of the options below before you can build
+anything:
+
+On Windows, run
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\setup-deps.ps1 -ckan path\to\ckan.exe
+```
+
+On Linux/MacOS run
+```bash
+./setup-deps.sh
+```
+
+These must be run in the repository root. They will create some fake ckan
+installs under `deps/installs` and install the relevant mods within.
+
+
+## Building
+In order to build the mod you will need:
+- the `dotnet` CLI
+
+Next, you will want to create a `HotReloadKSP.props.user` file
+in the repository root, like this one:
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+
+<Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <PropertyGroup>
+        <ReferencePath>$KSP_ROOT_PATH</ReferencePath>
+    </PropertyGroup>
+</Project>
+```
+
+Make sure to replace `$KSP_ROOT_PATH` with the path to your KSP installation.
+If you have an install made via steam then you might be able to skip this step.
+
+Finally, you can build by running either:
+- `dotnet build` (for a debug build), or,
+- `dotnet build -c Release` (for a release build)
+
+This will create a `GameData\HotReloadKSP` folder which you can then drop
+into your KSP install's `GameData` folder.
+
+> ### Linking the output into your `GameData` folder
+> If you're iterating on patches/code/whatever then you'll find that manually
+> copying stuff into the `GameData` folder will get old really quickly. You can
+> instead create a junction (on windows) or a symlink (on mac/linux) so that
+> KSP will just look into the build artifact directory.
+>
+> To do this you will need to run the following command in an admin `cmd.exe`
+> prompt (for windows) in your `GameData` directory:
+> ```batch
+> mklink /j HotReloadKSP C:\path\to\HotReloadKSP\repo\GameData\HotReloadKSP
+> ```
+>
+> On Linux or MacOS you should be able to accomplish the same thing using `ln`.
+
+## Formatting
+We use `csharpier` to format C# code. You can first install it by running
+```sh
+dotnet tool restore
+```
+
+Once you have done that you can then format everything by running
+```sh
+dotnet csharpier format .
+```

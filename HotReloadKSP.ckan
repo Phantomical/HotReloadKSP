@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/KSP-CKAN/CKAN/refs/heads/master/CKAN.schema
+
+tags:
+  - plugin
+
+depends:
+  - name: ModuleManager
+    min_version: 4.2.3
+  - name: Harmony2
+    min_version: 2.2.1
