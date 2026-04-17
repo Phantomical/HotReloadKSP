@@ -9,11 +9,20 @@ internal abstract class DebugScreenButton : MonoBehaviour
 
     void Awake()
     {
-        button.onClick.AddListener(OnClick);
         SetupValues();
     }
 
     protected virtual void SetupValues() { }
 
     protected abstract void OnClick();
+
+    protected virtual void OnEnable()
+    {
+        button.onClick.AddListener(OnClick);
+    }
+
+    protected virtual void OnDisable()
+    {
+        button.onClick.RemoveListener(OnClick);
+    }
 }

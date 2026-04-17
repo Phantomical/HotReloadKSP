@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -14,12 +15,6 @@ internal class MainScreenContent : MonoBehaviour
 
     [SerializeField]
     TextMeshProUGUI statusLabel;
-
-    // The reload button's onClick listener is non-persistent, so it isn't copied
-    // when the prefab is Instantiate'd. We hold a serialized reference and rewire
-    // the listener in Awake on each clone.
-    [SerializeField]
-    Button reloadButton;
 
     // Selection persists by assembly simple name so it survives list rebuilds
     // (which happen every OnEnable because assemblies may be loaded/reloaded).
@@ -37,15 +32,13 @@ internal class MainScreenContent : MonoBehaviour
         DebugUIManager.CreateSpacer(content, 4f);
 
         var btnRow = DebugUIManager.CreateHorizontalLayout(content);
-        reloadButton = DebugUIManager.CreateButton(btnRow.transform, "Reload Selected", null);
+        var reloadButton = DebugUIManager.CreateButton<ReloadButton>(
+            btnRow.transform,
+            "Reload Selected"
+        );
+        reloadButton.screen = this;
 
         statusLabel = DebugUIManager.CreateLabel(content, "");
-    }
-
-    void Awake()
-    {
-        if (reloadButton != null)
-            reloadButton.onClick.AddListener(ReloadSelected);
     }
 
     void OnEnable()
@@ -97,7 +90,7 @@ internal class MainScreenContent : MonoBehaviour
         }
     }
 
-    void ReloadSelected()
+    internal void ReloadSelected()
     {
         if (selected.Count == 0)
         {
