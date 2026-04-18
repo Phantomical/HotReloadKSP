@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -65,6 +66,8 @@ internal class MainScreenContent : MonoBehaviour
         {
             if (la?.assembly == null)
                 continue;
+            if (!IsHotReloadable(la.assembly))
+                continue;
             entries.Add(la);
         }
         entries.Sort((a, b) => string.Compare(a.name, b.name, StringComparison.OrdinalIgnoreCase));
@@ -124,6 +127,16 @@ internal class MainScreenContent : MonoBehaviour
 
         SetStatus(failed == 0 ? $"Reloaded {ok} assembly(s)." : $"Reloaded {ok}, {failed} failed.");
         RebuildList();
+    }
+
+    static bool IsHotReloadable(Assembly asm)
+    {
+        foreach (var attr in asm.GetCustomAttributes<AssemblyMetadataAttribute>())
+        {
+            if (attr.Key == "HotReload" && attr.Value == "true")
+                return true;
+        }
+        return false;
     }
 
     static AssemblyLoader.LoadedAssembly FindLoaded(string name)
