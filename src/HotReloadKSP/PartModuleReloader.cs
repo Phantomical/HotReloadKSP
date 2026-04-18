@@ -16,12 +16,28 @@ internal static class PartModuleReloader
         public ConfigNode PersistentNode;
     }
 
-    public static List<ModuleSnapshot> SnapshotAndDetach(Assembly oldAsm)
+    internal struct PawSnapshot
     {
-        var snapshots = new List<ModuleSnapshot>();
+        public uint PartPersistentId;
+        public bool Pinned;
+    }
+
+    internal struct ReloadSnapshot
+    {
+        public List<ModuleSnapshot> Modules;
+        public List<PawSnapshot> Paws;
+    }
+
+    public static ReloadSnapshot SnapshotAndDetach(Assembly oldAsm)
+    {
+        var result = new ReloadSnapshot
+        {
+            Modules = new List<ModuleSnapshot>(),
+            Paws = new List<PawSnapshot>(),
+        };
 
         if (FlightGlobals.fetch == null || FlightGlobals.Vessels == null)
-            return snapshots;
+            return result;
 
         for (int vi = 0; vi < FlightGlobals.Vessels.Count; vi++)
         {
@@ -47,7 +63,7 @@ internal static class PartModuleReloader
 
                     if (!pawClosed)
                     {
-                        ClosePawsForPart(part);
+                        ClosePawsForPart(part, result.Paws);
                         pawClosed = true;
                     }
 
@@ -65,7 +81,7 @@ internal static class PartModuleReloader
                         Log.LogException(ex);
                     }
 
-                    snapshots.Add(
+                    result.Modules.Add(
                         new ModuleSnapshot
                         {
                             PartPersistentId = part.persistentId,
@@ -93,7 +109,7 @@ internal static class PartModuleReloader
             }
         }
 
-        return snapshots;
+        return result;
     }
 
     public static void ReloadPrefabs(Assembly oldAsm, Assembly newAsm)
@@ -170,15 +186,18 @@ internal static class PartModuleReloader
         }
     }
 
-    public static void ReattachAndRestore(List<ModuleSnapshot> snapshots, Assembly newAsm)
+    public static void ReattachAndRestore(ReloadSnapshot state, Assembly newAsm)
     {
-        if (snapshots.Count == 0)
-            return;
         if (FlightGlobals.fetch == null)
             return;
+        if (state.Modules.Count == 0)
+        {
+            ReopenPaws(state.Paws);
+            return;
+        }
 
         var byPart = new Dictionary<uint, List<ModuleSnapshot>>();
-        foreach (var s in snapshots)
+        foreach (var s in state.Modules)
         {
             if (!byPart.TryGetValue(s.PartPersistentId, out var list))
             {
@@ -243,6 +262,8 @@ internal static class PartModuleReloader
 
             part.ClearModuleReferenceCache();
         }
+
+        ReopenPaws(state.Paws);
     }
 
     static ConfigNode FindPrefabModuleNode(Part part, PartModule m, int moduleIndex)
@@ -311,21 +332,86 @@ internal static class PartModuleReloader
         return null;
     }
 
-    static void ClosePawsForPart(Part part)
+    static void ClosePawsForPart(Part part, List<PawSnapshot> paws)
     {
         var ctrl = UIPartActionController.Instance;
-        if (ctrl == null || ctrl.windows == null)
+        if (ctrl == null)
             return;
 
-        for (int i = ctrl.windows.Count - 1; i >= 0; i--)
+        bool anyFound = false;
+        bool anyPinned = false;
+
+        if (ctrl.windows != null)
         {
-            var w = ctrl.windows[i];
-            if (w == null)
+            for (int i = ctrl.windows.Count - 1; i >= 0; i--)
+            {
+                var w = ctrl.windows[i];
+                if (w == null)
+                    continue;
+                if (w.part != part)
+                    continue;
+                anyFound = true;
+                if (w.Pinned)
+                    anyPinned = true;
+                ctrl.windows.RemoveAt(i);
+                UnityEngine.Object.DestroyImmediate(w.gameObject);
+            }
+        }
+
+        // Also purge any hidden windows for this part; otherwise a subsequent
+        // SpawnPartActionWindow would revive the hidden window with stale
+        // listItems pointing at destroyed old-assembly modules.
+        if (ctrl.hiddenWindows != null)
+        {
+            for (int i = ctrl.hiddenWindows.Count - 1; i >= 0; i--)
+            {
+                var w = ctrl.hiddenWindows[i];
+                if (w == null)
+                    continue;
+                if (w.part != part)
+                    continue;
+                if (w.Pinned)
+                    anyPinned = true;
+                ctrl.hiddenWindows.RemoveAt(i);
+                UnityEngine.Object.DestroyImmediate(w.gameObject);
+            }
+        }
+
+        if (anyFound)
+            paws.Add(new PawSnapshot { PartPersistentId = part.persistentId, Pinned = anyPinned });
+    }
+
+    static void ReopenPaws(List<PawSnapshot> paws)
+    {
+        if (paws == null || paws.Count == 0)
+            return;
+        var ctrl = UIPartActionController.Instance;
+        if (ctrl == null)
+            return;
+
+        foreach (var ps in paws)
+        {
+            var part = FindPartByPersistentId(ps.PartPersistentId);
+            if (part == null)
                 continue;
-            if (w.part != part)
+
+            try
+            {
+                ctrl.SpawnPartActionWindow(part);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"SpawnPartActionWindow threw for part {part.partInfo?.name}");
+                Log.LogException(ex);
                 continue;
-            ctrl.windows.RemoveAt(i);
-            UnityEngine.Object.DestroyImmediate(w.gameObject);
+            }
+
+            if (!ps.Pinned)
+                continue;
+
+            var w = ctrl.GetItem(part, false);
+            if (w != null && w.togglePinned != null)
+                w.togglePinned.isOn = true;
         }
     }
 }

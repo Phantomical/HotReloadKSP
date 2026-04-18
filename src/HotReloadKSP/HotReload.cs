@@ -173,9 +173,9 @@ public static class HotReload
         if (oldAssembly == null)
             return;
 
-        var snapshots = PartModuleReloader.SnapshotAndDetach(oldAssembly);
+        var state = PartModuleReloader.SnapshotAndDetach(oldAssembly);
         PartModuleReloader.ReloadPrefabs(oldAssembly, newAssembly);
-        PartModuleReloader.ReattachAndRestore(snapshots, newAssembly);
+        PartModuleReloader.ReattachAndRestore(state, newAssembly);
     }
 
     /// <summary>

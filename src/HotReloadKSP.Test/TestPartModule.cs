@@ -9,8 +9,14 @@ namespace HotReloadKSP.Test;
 /// </summary>
 public class TestPartModule : PartModule
 {
-    [KSPField(guiActive = true, guiActiveEditor = true, guiName = "Hot Reload Test")]
-    public string message = "I'm a test string!";
+    [KSPField(
+        guiActive = true,
+        guiActiveEditor = true,
+        guiName = "Hot Reload Test",
+        groupName = "Hot Reload",
+        groupDisplayName = "Hot Reload"
+    )]
+    public string message = "I'm a test string! (mk2)";
 
     public override void OnStart(StartState state)
     {
