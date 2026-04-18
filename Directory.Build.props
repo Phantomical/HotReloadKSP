@@ -22,6 +22,14 @@
         <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
 
         <ProjectRootDir>$(MSBuildThisFileDirectory)</ProjectRootDir>
+        <RepoRootPath>$(MSBuildThisFileDirectory)</RepoRootPath>
+
+        <!--
+            KSPBuildTools needs these defined, but they don't exist if we are
+            only building a single project. In that case we define them here.
+        -->
+        <SolutionDir Condition=" '$(SolutionDir)' == '' Or '$(SolutionDir)' == '*Undefined*' ">$(MSBuildThisFileDirectory)</SolutionDir>
+        <SolutionName Condition=" '$(SolutionName)' == '' Or '$(SolutionName)' == '*Undefined*' ">HotReloadKSP</SolutionName>
 
         <!-- Properties used by KSPBuildTools -->
         <GameDataSubDir>HotReloadKSP</GameDataSubDir>
