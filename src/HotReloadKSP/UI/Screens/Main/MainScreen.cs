@@ -52,14 +52,12 @@ internal class MainScreenContent : MonoBehaviour
     {
         if (listContainer == null)
             return;
-        for (int i = listContainer.childCount - 1; i >= 0; i--)
-            Destroy(listContainer.GetChild(i).gameObject);
+        ClearList();
     }
 
     void RebuildList()
     {
-        for (int i = listContainer.childCount - 1; i >= 0; i--)
-            Destroy(listContainer.GetChild(i).gameObject);
+        ClearList();
 
         // If we have been hot-reloaded then let the new version take care of this.
         if (this == null)
@@ -93,6 +91,22 @@ internal class MainScreenContent : MonoBehaviour
                 else
                     selected.Remove(key);
             });
+        }
+    }
+
+    // Toggle.OnDisable/OnDestroy during parent SetActive(false) or Destroy can
+    // synchronously fire onValueChanged(false), which would run our listener and
+    // drop the entry from `selected` mid-reload. Strip listeners before the child
+    // goes away so the backing set survives the rebuild.
+    void ClearList()
+    {
+        for (int i = listContainer.childCount - 1; i >= 0; i--)
+        {
+            var child = listContainer.GetChild(i).gameObject;
+            var toggle = child.GetComponentInChildren<Toggle>(includeInactive: true);
+            if (toggle != null)
+                toggle.onValueChanged.RemoveAllListeners();
+            Destroy(child);
         }
     }
 
