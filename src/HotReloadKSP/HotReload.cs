@@ -106,9 +106,38 @@ public static class HotReload
     static (byte[] bytes, string originalName) RewriteIdentity(byte[] dllBytes)
     {
         using var dllIn = new MemoryStream(dllBytes, writable: false);
+
+        // Cecil's Write path re-reads every custom attribute, which forces it to
+        // resolve types from referenced assemblies (e.g. enum arguments). The
+        // default resolver only searches the working directory, so references
+        // to things like Kopernicus.Parser would fail. Seed the resolver with
+        // the on-disk directory of every assembly already loaded into the
+        // AppDomain so those lookups succeed.
+        var resolver = new DefaultAssemblyResolver();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var loaded in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            string location;
+            try
+            {
+                location = loaded.Location;
+            }
+            catch
+            {
+                continue;
+            }
+            if (string.IsNullOrEmpty(location))
+                continue;
+            var dir = Path.GetDirectoryName(location);
+            if (string.IsNullOrEmpty(dir))
+                continue;
+            if (seen.Add(dir))
+                resolver.AddSearchDirectory(dir);
+        }
+
         var asmDef = AssemblyDefinition.ReadAssembly(
             dllIn,
-            new ReaderParameters { ReadSymbols = false }
+            new ReaderParameters { ReadSymbols = false, AssemblyResolver = resolver }
         );
 
         var originalName = asmDef.Name.Name;
