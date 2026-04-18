@@ -23,6 +23,13 @@ using System.Reflection;
 [assembly: AssemblyMetadata("HotReload", "true")]
 ```
 
+You can also declare this directly in your csproj file
+```xml
+<ItemGroup>
+  <AssemblyMetadata Include="HotReload" Value="true" />
+</ItemGroup>
+```
+
 ## What gets transferred over when hot-reloading?
 How a reload works depends on its type. Stuff that can use KSP's save/load
 system should be much more reliable, the way that MonoBehaviours are reloaded
