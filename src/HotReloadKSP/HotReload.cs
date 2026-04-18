@@ -12,11 +12,7 @@ public static class HotReload
     /// An event that gets fired when an assembly gets hot-reloaded. Use this
     /// if you want to respond to the hot reload of <i>another</i> assembly.
     /// </summary>
-    public static EventData<GameEvents.FromToAction<Assembly, Assembly>> OnAssemblyHotReload
-    {
-        get;
-        private set;
-    }
+    public static event Action<Assembly, Assembly> OnAssemblyHotReload;
 
     /// <summary>
     /// Load the assembly at <paramref name="path"/> from disk bytes and reload it.
@@ -86,7 +82,7 @@ public static class HotReload
                 ? MonoBehaviourReloader.Pending.Empty
                 : MonoBehaviourReloader.PrepareReload(oldAssembly, newAssembly);
         InvokeStaticHotLoadHooks(newAssembly);
-        OnAssemblyHotReload.Fire(new(oldAssembly, newAssembly));
+        OnAssemblyHotReload?.Invoke(oldAssembly, newAssembly);
         InvokeStaticHotUnloadHooks(oldAssembly);
         MonoBehaviourReloader.FinalizeReload(pending);
 
