@@ -100,10 +100,10 @@ internal static class MonoBehaviourReloader
                 continue;
 
             var typeName = entry.Type.FullName;
-            Component newComp;
+            Component newCompRaw;
             try
             {
-                newComp = go.AddComponent(entry.Type);
+                newCompRaw = go.AddComponent(entry.Type);
             }
             catch (Exception ex)
             {
@@ -112,17 +112,25 @@ internal static class MonoBehaviourReloader
                 continue;
             }
 
-            if (newComp == null)
+            if (newCompRaw == null)
             {
                 Log.Error($"AddComponent returned null for {typeName}");
                 continue;
             }
 
+            // Keep the new component disabled across reactivation so OnEnable
+            // only fires after the old component has been destroyed. Otherwise
+            // the old component's OnDisable during DestroyImmediate can undo
+            // whatever the new component's OnEnable just set up (self-reload
+            // scenarios where the UI component is on the new assembly).
+            var newComp = (MonoBehaviour)newCompRaw;
+            newComp.enabled = false;
+
             swaps.Add(
                 new Swap
                 {
                     Old = oldComp,
-                    New = (MonoBehaviour)newComp,
+                    New = newComp,
                     Hook = entry.Hook,
                     NewFields = entry.SafeFields,
                     OldFields = GetOldFields(oldType, entry.SafeFields, oldFieldCache),
@@ -162,9 +170,10 @@ internal static class MonoBehaviourReloader
     }
 
     /// <summary>
-    /// Restore each parent GameObject's original <c>activeSelf</c> (firing
-    /// <c>Awake</c>/<c>OnEnable</c> on the new components) and destroy the old
-    /// components left behind by <see cref="PrepareReload"/>.
+    /// Restore each parent GameObject's original <c>activeSelf</c>, destroy the old
+    /// components left behind by <see cref="PrepareReload"/>, then enable the new
+    /// components so their <c>OnEnable</c> runs only after the matching old
+    /// component's <c>OnDisable</c>/<c>OnDestroy</c> have finished.
     /// </summary>
     internal static void FinalizeReload(Pending pending)
     {
@@ -180,6 +189,21 @@ internal static class MonoBehaviourReloader
             catch (Exception ex)
             {
                 Log.Error($"DestroyImmediate threw for old {s.TypeName}");
+                Log.LogException(ex);
+            }
+        }
+
+        foreach (var s in pending.Swaps)
+        {
+            if (s.New == null)
+                continue;
+            try
+            {
+                s.New.enabled = true;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Enabling new {s.TypeName} threw");
                 Log.LogException(ex);
             }
 

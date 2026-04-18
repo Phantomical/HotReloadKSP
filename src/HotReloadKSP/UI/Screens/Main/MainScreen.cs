@@ -61,6 +61,10 @@ internal class MainScreenContent : MonoBehaviour
         for (int i = listContainer.childCount - 1; i >= 0; i--)
             Destroy(listContainer.GetChild(i).gameObject);
 
+        // If we have been hot-reloaded then let the new version take care of this.
+        if (this == null)
+            return;
+
         var entries = new List<AssemblyLoader.LoadedAssembly>();
         foreach (var la in AssemblyLoader.loadedAssemblies)
         {
