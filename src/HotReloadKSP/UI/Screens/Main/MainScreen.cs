@@ -57,11 +57,13 @@ internal class MainScreenContent : MonoBehaviour
 
     void RebuildList()
     {
-        ClearList();
-
-        // If we have been hot-reloaded then let the new version take care of this.
+        // Post-self-reload, ReloadSelected keeps running on this destroyed old
+        // instance and calls RebuildList again; the replacement's OnEnable has
+        // already populated the list, so bail before ClearList wipes it.
         if (this == null)
             return;
+
+        ClearList();
 
         var entries = new List<AssemblyLoader.LoadedAssembly>();
         foreach (var la in AssemblyLoader.loadedAssemblies)
