@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using Mono.Cecil;
@@ -82,6 +83,7 @@ public static class HotReload
                 ? MonoBehaviourReloader.Pending.Empty
                 : MonoBehaviourReloader.PrepareReload(oldAssembly, newAssembly);
         InvokeStaticHotLoadHooks(newAssembly);
+        StopPQSSpheres(pending.PQSToRebuild);
 
         try
         {
@@ -95,6 +97,7 @@ public static class HotReload
 
         InvokeStaticHotUnloadHooks(oldAssembly);
         MonoBehaviourReloader.FinalizeReload(pending);
+        StartPQSSpheres(pending.PQSToRebuild);
 
         sw.Stop();
         Log.Info($"Reload complete in {sw.Elapsed.TotalMilliseconds:F1} ms");
@@ -218,6 +221,47 @@ public static class HotReload
     static void InvokeStaticHotLoadHooks(Assembly newAssembly)
     {
         InvokeStaticHooks(newAssembly, "OnHotLoad");
+    }
+
+    static void StopPQSSpheres(IEnumerable<PQS> spheres)
+    {
+        foreach (var pqs in spheres)
+        {
+            if (pqs == null || !pqs.isActiveAndEnabled)
+                continue;
+            try
+            {
+                pqs.ResetSphere();
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"PQS.RebuildSphere threw for {pqs.name}");
+                Log.LogException(ex);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Rebuild every active <see cref="PQS"/> whose GameObject hosted a reloaded
+    /// <see cref="PQSMod"/>. A PQS caches its mod list and built geometry, so swapped-in
+    /// mods don't contribute until the sphere is rebuilt.
+    /// </summary>
+    static void StartPQSSpheres(HashSet<PQS> spheres)
+    {
+        foreach (var pqs in spheres)
+        {
+            if (pqs == null || !pqs.isActiveAndEnabled)
+                continue;
+            try
+            {
+                pqs.StartSphere(force: false);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"PQS.RebuildSphere threw for {pqs.name}");
+                Log.LogException(ex);
+            }
+        }
     }
 
     static void InvokeStaticHooks(Assembly asm, string methodName)

@@ -36,18 +36,17 @@ internal static class MonoBehaviourReloader
         public string TypeName;
     }
 
-    internal readonly struct Pending
+    internal readonly struct Pending(
+        List<Swap> swaps,
+        Dictionary<GameObject, bool> originalActive,
+        HashSet<PQS> pqsToRebuild
+    )
     {
-        internal readonly List<Swap> Swaps;
-        internal readonly Dictionary<GameObject, bool> OriginalActive;
+        internal readonly List<Swap> Swaps = swaps;
+        internal readonly Dictionary<GameObject, bool> OriginalActive = originalActive;
+        internal readonly HashSet<PQS> PQSToRebuild = pqsToRebuild;
 
-        internal Pending(List<Swap> swaps, Dictionary<GameObject, bool> originalActive)
-        {
-            Swaps = swaps;
-            OriginalActive = originalActive;
-        }
-
-        internal static Pending Empty => new(new List<Swap>(), new Dictionary<GameObject, bool>());
+        internal static Pending Empty => new([], [], []);
     }
 
     /// <summary>
@@ -86,6 +85,7 @@ internal static class MonoBehaviourReloader
             SafeSetActive(kv.Key, false, "<batch>");
 
         var swaps = new List<Swap>();
+        var pqsToRebuild = new HashSet<PQS>();
         foreach (var oldComp in candidates)
         {
             if (oldComp == null)
@@ -125,6 +125,9 @@ internal static class MonoBehaviourReloader
             // scenarios where the UI component is on the new assembly).
             var newComp = (MonoBehaviour)newCompRaw;
             newComp.enabled = false;
+
+            if (oldComp is PQSMod oldPqsMod && oldPqsMod.sphere != null)
+                pqsToRebuild.Add(oldPqsMod.sphere);
 
             swaps.Add(
                 new Swap
@@ -166,7 +169,7 @@ internal static class MonoBehaviourReloader
             }
         }
 
-        return new Pending(swaps, originalActive);
+        return new Pending(swaps, originalActive, pqsToRebuild);
     }
 
     /// <summary>
