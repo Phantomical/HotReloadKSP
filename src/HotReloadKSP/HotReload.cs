@@ -9,6 +9,16 @@ namespace HotReloadKSP;
 public static class HotReload
 {
     /// <summary>
+    /// An event that gets fired when an assembly gets hot-reloaded. Use this
+    /// if you want to respond to the hot reload of <i>another</i> assembly.
+    /// </summary>
+    public static EventData<GameEvents.FromToAction<Assembly, Assembly>> OnAssemblyHotReload
+    {
+        get;
+        private set;
+    }
+
+    /// <summary>
     /// Load the assembly at <paramref name="path"/> from disk bytes and reload it.
     /// </summary>
     public static void Reload(string path)
@@ -76,6 +86,7 @@ public static class HotReload
                 ? MonoBehaviourReloader.Pending.Empty
                 : MonoBehaviourReloader.PrepareReload(oldAssembly, newAssembly);
         InvokeStaticHotLoadHooks(newAssembly);
+        OnAssemblyHotReload.Fire(new(oldAssembly, newAssembly));
         InvokeStaticHotUnloadHooks(oldAssembly);
         MonoBehaviourReloader.FinalizeReload(pending);
 
