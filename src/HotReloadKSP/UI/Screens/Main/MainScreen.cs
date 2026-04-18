@@ -16,9 +16,10 @@ internal class MainScreenContent : MonoBehaviour
     [SerializeField]
     TextMeshProUGUI statusLabel;
 
-    // Selection persists by assembly simple name so it survives list rebuilds
-    // (which happen every OnEnable because assemblies may be loaded/reloaded).
-    readonly HashSet<string> selected = new();
+    [SerializeField]
+    Toggle autoReload;
+
+    readonly HashSet<string> selected = new(StringComparer.OrdinalIgnoreCase);
 
     internal void BuildUI()
     {
@@ -31,6 +32,7 @@ internal class MainScreenContent : MonoBehaviour
 
         DebugUIManager.CreateSpacer(content, 4f);
 
+        autoReload = DebugUIManager.CreateToggle(content, "Auto-reload on file change");
         var btnRow = DebugUIManager.CreateHorizontalLayout(content);
         var reloadButton = DebugUIManager.CreateButton<ReloadButton>(
             btnRow.transform,
@@ -41,11 +43,24 @@ internal class MainScreenContent : MonoBehaviour
         statusLabel = DebugUIManager.CreateLabel(content, "");
     }
 
+    void Start()
+    {
+        autoReload.onValueChanged.AddListener(OnAutoReloadToggle);
+    }
+
+    void OnDestroy()
+    {
+        autoReload.onValueChanged.RemoveListener(OnAutoReloadToggle);
+    }
+
     void OnEnable()
     {
         if (listContainer == null)
             return;
         RebuildList();
+        var manager = AutoReloadManager.Instance;
+        if (manager != null)
+            manager.enabled = autoReload.isOn;
     }
 
     void OnDisable()
@@ -53,6 +68,15 @@ internal class MainScreenContent : MonoBehaviour
         if (listContainer == null)
             return;
         ClearList();
+    }
+
+    void OnAutoReloadToggle(bool value)
+    {
+        var manager = AutoReloadManager.Instance;
+        if (manager == null)
+            return;
+
+        manager.enabled = value;
     }
 
     void RebuildList()
@@ -83,31 +107,36 @@ internal class MainScreenContent : MonoBehaviour
             var toggle = DebugUIManager.CreateToggle(listContainer, label);
 
             toggle.interactable = reloadable;
-            toggle.isOn = reloadable && selected.Contains(la.name);
 
-            var key = la.name;
-            toggle.onValueChanged.AddListener(isOn =>
+            if (reloadable)
             {
-                if (isOn)
-                    selected.Add(key);
-                else
-                    selected.Remove(key);
-            });
+                var key = Path.GetFullPath(la.path);
+                toggle.isOn = selected.Contains(key);
+
+                toggle.onValueChanged.AddListener(isOn =>
+                {
+                    if (isOn)
+                        selected.Add(key);
+                    else
+                        selected.Remove(key);
+
+                    AutoReloadManager.Instance?.SetSelected(selected);
+                });
+            }
         }
     }
 
     // Toggle.OnDisable/OnDestroy during parent SetActive(false) or Destroy can
     // synchronously fire onValueChanged(false), which would run our listener and
-    // drop the entry from `selected` mid-reload. Strip listeners before the child
-    // goes away so the backing set survives the rebuild.
+    // drop the entry from the manager's selection mid-reload. Strip listeners
+    // before the child goes away so the backing set survives the rebuild.
     void ClearList()
     {
         for (int i = listContainer.childCount - 1; i >= 0; i--)
         {
             var child = listContainer.GetChild(i).gameObject;
             var toggle = child.GetComponentInChildren<Toggle>(includeInactive: true);
-            if (toggle != null)
-                toggle.onValueChanged.RemoveAllListeners();
+            toggle?.onValueChanged.RemoveAllListeners();
             Destroy(child);
         }
     }
@@ -122,12 +151,12 @@ internal class MainScreenContent : MonoBehaviour
 
         int ok = 0;
         int failed = 0;
-        foreach (var name in selected)
+        foreach (var path in selected)
         {
-            var la = FindLoaded(name);
+            var la = FindLoadedByPath(path);
             if (la == null || string.IsNullOrEmpty(la.path) || !File.Exists(la.path))
             {
-                Log.Warn($"Skipping {name}: no loaded entry or missing file");
+                Log.Warn($"Skipping {path}: no loaded entry or missing file");
                 failed++;
                 continue;
             }
@@ -139,7 +168,7 @@ internal class MainScreenContent : MonoBehaviour
             }
             catch (Exception ex)
             {
-                Log.Error($"Reload threw for {name}");
+                Log.Error($"Reload threw for {la.name}");
                 Log.LogException(ex);
                 failed++;
             }
@@ -159,13 +188,13 @@ internal class MainScreenContent : MonoBehaviour
         return false;
     }
 
-    static AssemblyLoader.LoadedAssembly FindLoaded(string name)
+    static AssemblyLoader.LoadedAssembly FindLoadedByPath(string path)
     {
         foreach (var la in AssemblyLoader.loadedAssemblies)
         {
-            if (la?.assembly == null)
+            if (la?.assembly == null || string.IsNullOrEmpty(la.path))
                 continue;
-            if (la.name == name)
+            if (string.Equals(Path.GetFullPath(la.path), path, StringComparison.OrdinalIgnoreCase))
                 return la;
         }
         return null;
