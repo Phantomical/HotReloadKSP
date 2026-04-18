@@ -42,9 +42,7 @@ internal static class VesselModuleReloader
                 }
                 catch (Exception ex)
                 {
-                    Log.Warn(
-                        $"Save threw for {m.GetType().FullName} on vessel {v.vesselName}"
-                    );
+                    Log.Warn($"Save threw for {m.GetType().FullName} on vessel {v.vesselName}");
                     Log.LogException(ex);
                 }
 
@@ -212,9 +210,7 @@ internal static class VesselModuleReloader
                 }
                 catch (Exception ex)
                 {
-                    Log.Error(
-                        $"Load threw for {snap.TypeName} on vessel {v.vesselName}"
-                    );
+                    Log.Error($"Load threw for {snap.TypeName} on vessel {v.vesselName}");
                     Log.LogException(ex);
                 }
             }

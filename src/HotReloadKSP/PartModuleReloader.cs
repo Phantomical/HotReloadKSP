@@ -153,9 +153,7 @@ internal static class PartModuleReloader
                 }
                 catch (Exception ex)
                 {
-                    Log.Error(
-                        $"AddModule threw during prefab rebuild for {ap.name}/{name}"
-                    );
+                    Log.Error($"AddModule threw during prefab rebuild for {ap.name}/{name}");
                     Log.LogException(ex);
                     continue;
                 }
@@ -195,9 +193,7 @@ internal static class PartModuleReloader
             var part = FindPartByPersistentId(kv.Key);
             if (part == null)
             {
-                Log.Warn(
-                    $"Part with persistentId {kv.Key} not found at reattach time; skipping"
-                );
+                Log.Warn($"Part with persistentId {kv.Key} not found at reattach time; skipping");
                 continue;
             }
 
@@ -237,9 +233,7 @@ internal static class PartModuleReloader
                 }
                 catch (Exception ex)
                 {
-                    Log.Error(
-                        $"Load threw for {snap.ModuleName} on part {part.partInfo?.name}"
-                    );
+                    Log.Error($"Load threw for {snap.ModuleName} on part {part.partInfo?.name}");
                     Log.LogException(ex);
                 }
 
