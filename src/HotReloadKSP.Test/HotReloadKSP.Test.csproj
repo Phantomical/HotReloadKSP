@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Toy mod used to exercise HotReloadKSP</Description>
+
+    <GameDataSubDir>HotReloadKSP.Test</GameDataSubDir>
+    <GameDataOutDir>$(ProjectRootDir)\GameData\$(GameDataSubDir)</GameDataOutDir>
+    <BinariesOutputRelativePath>GameData\$(GameDataSubDir)\Plugins</BinariesOutputRelativePath>
+
+    <KSPBT_ModRoot>$(GameDataOutDir)</KSPBT_ModRoot>
+    <KSPBT_ModPluginFolder>Plugins</KSPBT_ModPluginFolder>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="KSPBuildTools" Version="1.1.0" />
+  </ItemGroup>
+
+  <Target Name="GameDataPostClean" AfterTargets="Clean">
+    <RemoveDir Directories="$(GameDataOutDir)" />
+    <MakeDir Directories="$(GameDataOutDir)" />
+  </Target>
+
+  <Target Name="CopyExtrasToPluginFolder" AfterTargets="KSPBT_CopyDLLsToPluginFolder">
+    <ItemGroup>
+      <_ExtrasToCopy Include="$(TargetDir)/**/*.pdb" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(_ExtrasToCopy)" DestinationFolder="$(KSPBT_ModRoot)/$(KSPBT_ModPluginFolder)/%(RecursiveDir)" />
+  </Target>
+
+  <Target Name="CopyConfigsToGameData" AfterTargets="CopyFilesToOutputDirectory">
+    <ItemGroup>
+      <_ConfigsToCopy Include="$(MSBuildProjectDirectory)\GameData\**\*.*" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(_ConfigsToCopy)" DestinationFolder="$(GameDataOutDir)\%(RecursiveDir)" />
+  </Target>
+</Project>
