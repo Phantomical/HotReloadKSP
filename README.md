@@ -108,5 +108,14 @@ If you need to do things when _other_ assemblies are reloaded then you can add
 a listener to `HotReload.OnAssemblyHotReload` and then drive whatever you want
 to reload in your own codebase.
 
+## Limitations
+* Global state is not transferred. If you have something that needs to be
+  carried over then you will need to implement that yourself using
+  `OnHotLoad`/`OnHotUnload`.
+* Other assemblies will continue to use the original loaded assembly.
+  This applies even if those other assemblies are then reloaded themselves.
+* Automatic field copying for arbitrary `MonoBehavior`s is limited. For anything
+  complex you will need to use `OnHotLoad`/`OnHotUnload`.
+
 ## License
 HotReloadKSP is available under the MIT license.
