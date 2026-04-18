@@ -9,17 +9,25 @@ namespace HotReloadKSP.Test;
 /// </summary>
 public class TestPartModule : PartModule
 {
+    const string GroupName = "Hot-Reload";
+    const string GroupDisplayName = "Hot Reload!";
+
     [KSPField(
         guiActive = true,
         guiActiveEditor = true,
-        guiName = "Hot Reload Test",
-        groupName = "Hot Reload",
-        groupDisplayName = "Hot Reload"
+        guiName = "Test",
+        groupName = GroupName,
+        groupDisplayName = GroupDisplayName
     )]
-    public string message = "I'm a test string! (mk2)";
+    public string message = "I'm a test string!";
 
-    public override void OnStart(StartState state)
-    {
-        Debug.Log($"[HotReloadKSP.Test] TestPartModule.OnStart on {part.name}: {message}");
-    }
+    [KSPField(
+        isPersistant = true,
+        guiActive = true,
+        guiName = "A button!",
+        groupName = GroupName,
+        groupDisplayName = GroupDisplayName
+    )]
+    [UI_Toggle(enabledText = "yes", disabledText = "no")]
+    public bool button = false;
 }
