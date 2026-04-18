@@ -17,7 +17,7 @@ internal static class MonoBehaviourReloader
         public SafeField[] SafeFields;
     }
 
-    struct SafeField
+    internal struct SafeField
     {
         public FieldInfo Info;
 
@@ -26,7 +26,7 @@ internal static class MonoBehaviourReloader
         public bool Remap;
     }
 
-    struct Swap
+    internal struct Swap
     {
         public MonoBehaviour Old;
         public MonoBehaviour New;
@@ -36,17 +36,37 @@ internal static class MonoBehaviourReloader
         public string TypeName;
     }
 
-    public static void Reload(Assembly oldAsm, Assembly newAsm)
+    internal readonly struct Pending
+    {
+        internal readonly List<Swap> Swaps;
+        internal readonly Dictionary<GameObject, bool> OriginalActive;
+
+        internal Pending(List<Swap> swaps, Dictionary<GameObject, bool> originalActive)
+        {
+            Swaps = swaps;
+            OriginalActive = originalActive;
+        }
+
+        internal static Pending Empty => new(new List<Swap>(), new Dictionary<GameObject, bool>());
+    }
+
+    /// <summary>
+    /// Attach replacement components on inactive parent GameObjects, copy fields
+    /// across, and invoke each type's optional instance <c>OnHotReload</c> hook.
+    /// Parents stay inactive and old components stay alive until
+    /// <see cref="FinalizeReload"/> runs.
+    /// </summary>
+    internal static Pending PrepareReload(Assembly oldAsm, Assembly newAsm)
     {
         var newTypes = BuildNewTypeIndex(newAsm);
         if (newTypes.Count == 0)
-            return;
-
-        var oldFieldCache = new Dictionary<Type, FieldInfo[]>();
+            return Pending.Empty;
 
         var candidates = CollectCandidates(oldAsm);
         if (candidates.Count == 0)
-            return;
+            return Pending.Empty;
+
+        var oldFieldCache = new Dictionary<Type, FieldInfo[]>();
 
         // Record the pre-swap activeSelf for every parent GameObject once, so that
         // multiple swapped components sharing a GameObject don't stomp each other.
@@ -138,10 +158,20 @@ internal static class MonoBehaviourReloader
             }
         }
 
-        foreach (var kv in originalActive)
+        return new Pending(swaps, originalActive);
+    }
+
+    /// <summary>
+    /// Restore each parent GameObject's original <c>activeSelf</c> (firing
+    /// <c>Awake</c>/<c>OnEnable</c> on the new components) and destroy the old
+    /// components left behind by <see cref="PrepareReload"/>.
+    /// </summary>
+    internal static void FinalizeReload(Pending pending)
+    {
+        foreach (var kv in pending.OriginalActive)
             SafeSetActive(kv.Key, kv.Value, "<batch>");
 
-        foreach (var s in swaps)
+        foreach (var s in pending.Swaps)
         {
             try
             {

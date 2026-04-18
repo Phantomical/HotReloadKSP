@@ -66,9 +66,18 @@ public static class HotReload
         ReloadVesselModules(oldAssembly, newAssembly);
         ReloadPartModules(oldAssembly, newAssembly);
         ReloadScenarioModules(oldAssembly, newAssembly);
-        ReloadMonoBehaviours(oldAssembly, newAssembly);
-        InvokeStaticHotUnloadHooks(oldAssembly);
+
+        // Two-phase MonoBehaviour reload: new components are attached on inactive
+        // parents first so static OnHotLoad can populate new-assembly static state
+        // before any reattached component's OnEnable runs, and OnHotUnload can tear
+        // down old-assembly static state while its live components still exist.
+        var pending =
+            oldAssembly == null
+                ? MonoBehaviourReloader.Pending.Empty
+                : MonoBehaviourReloader.PrepareReload(oldAssembly, newAssembly);
         InvokeStaticHotLoadHooks(newAssembly);
+        InvokeStaticHotUnloadHooks(oldAssembly);
+        MonoBehaviourReloader.FinalizeReload(pending);
 
         sw.Stop();
         Log.Info($"Reload complete in {sw.Elapsed.TotalMilliseconds:F1} ms");
@@ -169,25 +178,10 @@ public static class HotReload
     }
 
     /// <summary>
-    /// Swap live MonoBehaviour components whose type is in <paramref name="oldAssembly"/> to the
-    /// matching new-assembly type. Fields are copied across and, if the new type declares
-    /// <c>OnHotReload(MonoBehaviour prev)</c>, it is invoked so the mod can do custom migration.
-    /// Components of KSP-handled types (VesselModule, PartModule, ScenarioModule) are skipped
-    /// here because earlier stages already dealt with them. Skipped on first-time loads.
-    /// </summary>
-    static void ReloadMonoBehaviours(Assembly oldAssembly, Assembly newAssembly)
-    {
-        if (oldAssembly == null)
-            return;
-
-        MonoBehaviourReloader.Reload(oldAssembly, newAssembly);
-    }
-
-    /// <summary>
     /// Invoke <c>static void OnHotUnload()</c> on every type in <paramref name="oldAssembly"/>
-    /// that declares one. Runs before the new assembly's reload hooks so old-assembly types
-    /// can tear down static state (caches, event subscriptions) before being stranded.
-    /// No-op on first-time loads.
+    /// that declares one. Runs after new components have been attached (inactive) and after the
+    /// new assembly's <c>OnHotLoad</c> hooks, so old-assembly types can tear down static state
+    /// once the new-assembly equivalents are ready to take over. No-op on first-time loads.
     /// </summary>
     static void InvokeStaticHotUnloadHooks(Assembly oldAssembly)
     {
@@ -198,9 +192,11 @@ public static class HotReload
 
     /// <summary>
     /// Invoke <c>static void OnHotLoad()</c> on every type in <paramref name="newAssembly"/>
-    /// that declares one. Runs after live component swaps and after old-assembly unload hooks
-    /// so new hooks observe the fully-swapped scene with old static state torn down.
-    /// Exceptions from individual hooks are logged but do not abort the sweep.
+    /// that declares one. Runs after replacement components have been attached (while still
+    /// inactive) and before their parent GameObjects are re-enabled, so new static state
+    /// (prefab caches, registries) is populated before any reattached component's
+    /// <c>OnEnable</c> observes it. Exceptions from individual hooks are logged but do not
+    /// abort the sweep.
     /// </summary>
     static void InvokeStaticHotLoadHooks(Assembly newAssembly)
     {

@@ -21,6 +21,22 @@ internal static class DebugUIManager
 
     static bool _initialized;
 
+    // Static state doesn't survive self-reload: the new assembly starts with null
+    // prefab fields, and MonoBehaviour OnEnable fires (during parent reactivation)
+    // before any mod code can re-init. Re-run Initialize here so Create* calls
+    // from reattached UI components find populated prefabs.
+    static void OnHotLoad()
+    {
+        _initialized = false;
+        _labelPrefab = null;
+        _buttonPrefab = null;
+        _togglePrefab = null;
+        _inputFieldPrefab = null;
+        _spacerPrefab = null;
+        _scrollbarPrefab = null;
+        Initialize();
+    }
+
     /// <summary>
     /// Must be called after DebugScreenSpawner has been set up (e.g. from MainMenu).
     /// Searches the existing debug screen prefabs for representative UI elements and
