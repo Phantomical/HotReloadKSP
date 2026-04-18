@@ -1,8 +1,8 @@
 using System;
-using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using Mono.Cecil;
+using UnityEngine;
 
 namespace HotReloadKSP;
 
@@ -64,7 +64,7 @@ public static class HotReload
             return;
         }
 
-        var sw = Stopwatch.StartNew();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         Log.Info($"Reloading {targetSimpleName}");
 
         var oldAssembly = AssemblySwap.Swap(newAssembly, targetSimpleName).OldAssembly;
@@ -82,7 +82,17 @@ public static class HotReload
                 ? MonoBehaviourReloader.Pending.Empty
                 : MonoBehaviourReloader.PrepareReload(oldAssembly, newAssembly);
         InvokeStaticHotLoadHooks(newAssembly);
-        OnAssemblyHotReload?.Invoke(oldAssembly, newAssembly);
+
+        try
+        {
+            OnAssemblyHotReload?.Invoke(oldAssembly, newAssembly);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError("OnAssemblyHotReload threw an exception");
+            Debug.LogException(e);
+        }
+
         InvokeStaticHotUnloadHooks(oldAssembly);
         MonoBehaviourReloader.FinalizeReload(pending);
 
