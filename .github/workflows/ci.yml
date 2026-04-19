@@ -46,6 +46,7 @@ jobs:
           shopt -s nullglob
           mkdir -p ${{ env.RELEASE_STAGING  }}
           cp -r -v GameData README* LICENSE* CHANGELOG* ${{ env.RELEASE_STAGING }}
+          rm -rf ${{ env.RELEASE_STAGING }}/GameData/HotReloadKSP.Test
           cp -r -v LICENSE* HotReloadKSP.ckan ${{ env.RELEASE_STAGING }}/GameData/HotReloadKSP
           cd ${{ env.RELEASE_STAGING }}
 
