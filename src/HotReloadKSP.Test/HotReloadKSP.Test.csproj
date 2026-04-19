@@ -14,10 +14,6 @@
     <PackageReference Include="KSPBuildTools" Version="1.1.0" />
   </ItemGroup>
 
-  <ItemGroup>
-    <AssemblyMetadata Include="HotReload" Value="true" />
-  </ItemGroup>
-
   <Target Name="GameDataPostClean" AfterTargets="Clean">
     <RemoveDir Directories="$(GameDataOutDir)" />
     <MakeDir Directories="$(GameDataOutDir)" />
