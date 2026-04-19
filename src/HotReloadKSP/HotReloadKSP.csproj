@@ -27,6 +27,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <AssemblyMetadata Include="HotReload" Value="true" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Reference Include="$(KSPBT_ManagedPath)/Mono.Cecil.dll">
       <Private>false</Private>
     </Reference>
