@@ -17,13 +17,28 @@ internal static class MonoBehaviourReloader
         public SafeField[] SafeFields;
     }
 
+    internal enum RemapKind : byte
+    {
+        // Field type does not involve the reloading assembly; copy the value as-is.
+        None,
+
+        // Field type is a MonoBehaviour subclass in the reloading assembly; replace
+        // the reference with the swapped-in new component.
+        Single,
+
+        // Field type is T[] where T is a MonoBehaviour subclass in the reloading
+        // assembly; allocate a new array of the new T and remap each element.
+        Array,
+
+        // Field type is List<T> where T is a MonoBehaviour subclass in the
+        // reloading assembly; allocate a new List<NewT> and remap each element.
+        List,
+    }
+
     internal struct SafeField
     {
         public FieldInfo Info;
-
-        // True if FieldType is a MonoBehaviour subclass in the reloading assembly;
-        // such references must be rewritten to the corresponding new component.
-        public bool Remap;
+        public RemapKind Kind;
     }
 
     internal struct Swap
@@ -225,20 +240,17 @@ internal static class MonoBehaviourReloader
             try
             {
                 var value = oldField.GetValue(s.Old);
-                if (safe.Remap && value != null)
+                switch (safe.Kind)
                 {
-                    var oldRef = (MonoBehaviour)value;
-                    if (remap.TryGetValue(oldRef, out var newRef))
-                    {
-                        value = newRef;
-                    }
-                    else
-                    {
-                        Log.Warn(
-                            $"Field {safe.Info.Name} on {s.TypeName} referenced an unswapped {oldRef.GetType().FullName}; setting to null"
-                        );
-                        value = null;
-                    }
+                    case RemapKind.Single:
+                        value = RemapSingle(value, safe, s.TypeName, remap);
+                        break;
+                    case RemapKind.Array:
+                        value = RemapArray((Array)value, safe, s.TypeName, remap);
+                        break;
+                    case RemapKind.List:
+                        value = RemapList((System.Collections.IList)value, safe, s.TypeName, remap);
+                        break;
                 }
                 safe.Info.SetValue(s.New, value);
             }
@@ -248,6 +260,87 @@ internal static class MonoBehaviourReloader
                 Log.LogException(ex);
             }
         }
+    }
+
+    static object RemapSingle(
+        object value,
+        SafeField safe,
+        string typeName,
+        Dictionary<MonoBehaviour, MonoBehaviour> remap
+    )
+    {
+        if (value == null)
+            return null;
+        var oldRef = (MonoBehaviour)value;
+        if (remap.TryGetValue(oldRef, out var newRef))
+            return newRef;
+        Log.Warn(
+            $"Field {safe.Info.Name} on {typeName} referenced an unswapped {oldRef.GetType().FullName}; setting to null"
+        );
+        return null;
+    }
+
+    static Array RemapArray(
+        Array oldArr,
+        SafeField safe,
+        string typeName,
+        Dictionary<MonoBehaviour, MonoBehaviour> remap
+    )
+    {
+        if (oldArr == null)
+            return null;
+        var newElemType = safe.Info.FieldType.GetElementType();
+        var newArr = Array.CreateInstance(newElemType, oldArr.Length);
+        for (int i = 0; i < oldArr.Length; i++)
+        {
+            var elem = (MonoBehaviour)oldArr.GetValue(i);
+            if (elem == null)
+                continue;
+            if (remap.TryGetValue(elem, out var newRef))
+            {
+                newArr.SetValue(newRef, i);
+            }
+            else
+            {
+                Log.Warn(
+                    $"Field {safe.Info.Name}[{i}] on {typeName} referenced an unswapped {elem.GetType().FullName}; setting to null"
+                );
+            }
+        }
+        return newArr;
+    }
+
+    static System.Collections.IList RemapList(
+        System.Collections.IList oldList,
+        SafeField safe,
+        string typeName,
+        Dictionary<MonoBehaviour, MonoBehaviour> remap
+    )
+    {
+        if (oldList == null)
+            return null;
+        var newList = (System.Collections.IList)Activator.CreateInstance(safe.Info.FieldType);
+        for (int i = 0; i < oldList.Count; i++)
+        {
+            var elem = (MonoBehaviour)oldList[i];
+            if (elem == null)
+            {
+                newList.Add(null);
+                continue;
+            }
+            if (remap.TryGetValue(elem, out var newRef))
+            {
+                newList.Add(newRef);
+            }
+            else
+            {
+                Log.Warn(
+                    $"Field {safe.Info.Name}[{i}] on {typeName} referenced an unswapped {elem.GetType().FullName}; setting to null"
+                );
+                newList.Add(null);
+            }
+        }
+        return newList;
     }
 
     static FieldInfo[] GetOldFields(
@@ -305,19 +398,47 @@ internal static class MonoBehaviourReloader
                 var ft = f.FieldType;
                 if (InvolvesAssembly(ft, reloadingAsm))
                 {
-                    // A direct MonoBehaviour-typed reference to a reloading type can be
-                    // remapped to the new component; anything else (non-MonoBehaviour
-                    // reloading types, containers of reloading types) stays skipped.
-                    if (ft.Assembly == reloadingAsm && typeof(MonoBehaviour).IsAssignableFrom(ft))
-                        fields.Add(new SafeField { Info = f, Remap = true });
+                    // MonoBehaviour-typed references to reloading types — direct,
+                    // T[], or List<T> — get remapped element-by-element via the
+                    // swap dictionary. Other containers and non-MonoBehaviour
+                    // types from the reloading assembly stay skipped.
+                    var kind = ClassifyRemap(ft, reloadingAsm);
+                    if (kind != RemapKind.None)
+                        fields.Add(new SafeField { Info = f, Kind = kind });
                     continue;
                 }
 
-                fields.Add(new SafeField { Info = f, Remap = false });
+                fields.Add(new SafeField { Info = f, Kind = RemapKind.None });
             }
             t = t.BaseType;
         }
         return fields.ToArray();
+    }
+
+    static RemapKind ClassifyRemap(Type ft, Assembly reloadingAsm)
+    {
+        if (ft.Assembly == reloadingAsm && typeof(MonoBehaviour).IsAssignableFrom(ft))
+            return RemapKind.Single;
+
+        if (ft.IsArray)
+        {
+            var elem = ft.GetElementType();
+            if (
+                elem != null
+                && elem.Assembly == reloadingAsm
+                && typeof(MonoBehaviour).IsAssignableFrom(elem)
+            )
+                return RemapKind.Array;
+        }
+
+        if (ft.IsGenericType && ft.GetGenericTypeDefinition() == typeof(List<>))
+        {
+            var elem = ft.GetGenericArguments()[0];
+            if (elem.Assembly == reloadingAsm && typeof(MonoBehaviour).IsAssignableFrom(elem))
+                return RemapKind.List;
+        }
+
+        return RemapKind.None;
     }
 
     static bool InvolvesAssembly(Type t, Assembly asm)
