@@ -82,7 +82,7 @@ public static class HotReload
             oldAssembly == null
                 ? MonoBehaviourReloader.Pending.Empty
                 : MonoBehaviourReloader.PrepareReload(oldAssembly, newAssembly);
-        InvokeStaticHotLoadHooks(newAssembly);
+        InvokeStaticHotLoadHooks(newAssembly, oldAssembly);
         StopPQSSpheres(pending.PQSToRebuild);
 
         try
@@ -95,7 +95,7 @@ public static class HotReload
             Debug.LogException(e);
         }
 
-        InvokeStaticHotUnloadHooks(oldAssembly);
+        InvokeStaticHotUnloadHooks(oldAssembly, newAssembly);
         MonoBehaviourReloader.FinalizeReload(pending);
         StartPQSSpheres(pending.PQSToRebuild);
 
@@ -227,29 +227,32 @@ public static class HotReload
     }
 
     /// <summary>
-    /// Invoke <c>static void OnHotUnload()</c> on every type in <paramref name="oldAssembly"/>
-    /// that declares one. Runs after new components have been attached (inactive) and after the
-    /// new assembly's <c>OnHotLoad</c> hooks, so old-assembly types can tear down static state
-    /// once the new-assembly equivalents are ready to take over. No-op on first-time loads.
+    /// Invoke <c>static void OnHotUnload()</c> or <c>static void OnHotUnload(Assembly newAssembly)</c>
+    /// on every type in <paramref name="oldAssembly"/> that declares one. Runs after new components
+    /// have been attached (inactive) and after the new assembly's <c>OnHotLoad</c> hooks, so
+    /// old-assembly types can tear down static state once the new-assembly equivalents are ready to
+    /// take over. The single-parameter overload receives the replacement assembly. No-op on
+    /// first-time loads.
     /// </summary>
-    static void InvokeStaticHotUnloadHooks(Assembly oldAssembly)
+    static void InvokeStaticHotUnloadHooks(Assembly oldAssembly, Assembly newAssembly)
     {
         if (oldAssembly == null)
             return;
-        InvokeStaticHooks(oldAssembly, "OnHotUnload");
+        InvokeStaticHooks(oldAssembly, "OnHotUnload", newAssembly);
     }
 
     /// <summary>
-    /// Invoke <c>static void OnHotLoad()</c> on every type in <paramref name="newAssembly"/>
-    /// that declares one. Runs after replacement components have been attached (while still
-    /// inactive) and before their parent GameObjects are re-enabled, so new static state
-    /// (prefab caches, registries) is populated before any reattached component's
-    /// <c>OnEnable</c> observes it. Exceptions from individual hooks are logged but do not
-    /// abort the sweep.
+    /// Invoke <c>static void OnHotLoad()</c> or <c>static void OnHotLoad(Assembly oldAssembly)</c>
+    /// on every type in <paramref name="newAssembly"/> that declares one. Runs after replacement
+    /// components have been attached (while still inactive) and before their parent GameObjects are
+    /// re-enabled, so new static state (prefab caches, registries) is populated before any
+    /// reattached component's <c>OnEnable</c> observes it. The single-parameter overload receives
+    /// the assembly being replaced (null on first-time loads). Exceptions from individual hooks are
+    /// logged but do not abort the sweep.
     /// </summary>
-    static void InvokeStaticHotLoadHooks(Assembly newAssembly)
+    static void InvokeStaticHotLoadHooks(Assembly newAssembly, Assembly oldAssembly)
     {
-        InvokeStaticHooks(newAssembly, "OnHotLoad");
+        InvokeStaticHooks(newAssembly, "OnHotLoad", oldAssembly);
     }
 
     static void StopPQSSpheres(IEnumerable<PQS> spheres)
@@ -293,7 +296,8 @@ public static class HotReload
         }
     }
 
-    static void InvokeStaticHooks(Assembly asm, string methodName)
+    static readonly Type[] StaticHookWithAssemblyParams = [typeof(Assembly)];
+    static void InvokeStaticHooks(Assembly asm, string methodName, Assembly counterpart)
     {
         Type[] types;
         try
@@ -315,9 +319,19 @@ public static class HotReload
                 continue;
 
             MethodInfo hook;
+            object[] args;
             try
             {
-                hook = t.GetMethod(methodName, flags, null, Type.EmptyTypes, null);
+                hook = t.GetMethod(methodName, flags, null, StaticHookWithAssemblyParams, null);
+                if (hook != null)
+                {
+                    args = [counterpart];
+                }
+                else
+                {
+                    hook = t.GetMethod(methodName, flags, null, Type.EmptyTypes, null);
+                    args = null;
+                }
             }
             catch (Exception ex)
             {
@@ -331,7 +345,7 @@ public static class HotReload
 
             try
             {
-                hook.Invoke(null, null);
+                hook.Invoke(null, args);
             }
             catch (TargetInvocationException tie)
             {
