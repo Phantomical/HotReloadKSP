@@ -73,6 +73,7 @@ public static class HotReload
         ReloadVesselModules(oldAssembly, newAssembly);
         ReloadPartModules(oldAssembly, newAssembly);
         ReloadScenarioModules(oldAssembly, newAssembly);
+        ReloadCustomParameters(oldAssembly, newAssembly);
 
         // Two-phase MonoBehaviour reload: new components are attached on inactive
         // parents first so static OnHotLoad can populate new-assembly static state
@@ -227,6 +228,21 @@ public static class HotReload
     }
 
     /// <summary>
+    /// Snapshot every <see cref="GameParameters.CustomParameterNode"/> instance whose type comes from
+    /// <paramref name="oldAssembly"/> across <see cref="HighLogic.CurrentGame"/> and
+    /// <see cref="GameParameters.DifficultyPresets"/>, then rebuild them from <paramref name="newAssembly"/>
+    /// and restore their saved state. Also updates <see cref="GameParameters.ParameterTypes"/> so newly
+    /// added or removed parameter classes are picked up. On first-time loads (<paramref name="oldAssembly"/>
+    /// is <c>null</c>) only registers new-assembly types and backfills defaults.
+    /// </summary>
+    static void ReloadCustomParameters(Assembly oldAssembly, Assembly newAssembly)
+    {
+        var snapshots =
+            oldAssembly == null ? null : CustomParameterReloader.SnapshotAndRemove(oldAssembly);
+        CustomParameterReloader.RegisterAndRestore(snapshots, oldAssembly, newAssembly);
+    }
+
+    /// <summary>
     /// Invoke <c>static void OnHotUnload()</c> or <c>static void OnHotUnload(Assembly newAssembly)</c>
     /// on every type in <paramref name="oldAssembly"/> that declares one. Runs after new components
     /// have been attached (inactive) and after the new assembly's <c>OnHotLoad</c> hooks, so
@@ -297,6 +313,7 @@ public static class HotReload
     }
 
     static readonly Type[] StaticHookWithAssemblyParams = [typeof(Assembly)];
+
     static void InvokeStaticHooks(Assembly asm, string methodName, Assembly counterpart)
     {
         Type[] types;
