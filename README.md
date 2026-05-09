@@ -70,15 +70,10 @@ Here's how hot-reloading a MonoBehavior works:
   same applies to `List<T>`.
 * Any references to other components that are being reloaded are updated to
   instead point at the new component being loaded in.
-* `OnHotLoad` is called on the new component, if it has a method with this
-  signature:
+* `OnHotReload` is called on the new component, with the old component passed
+  in, if it has a method with this signature:
   ```cs
-  void OnHotLoad(MonoBehavior old);
-  ```
-* `OnHotUnload` is then called on the old component, if it has a method with
-  this signature:
-  ```cs
-  void OnHotUnload(MonoBehavior new);
+  void OnHotReload(MonoBehaviour old);
   ```
 * The old component is then re-enabled and destroyed.
 * The new component is now re-enabled.
@@ -89,8 +84,8 @@ In short:
   also being hot-reloaded) will be automatically updated to point at the new
   version.
 * All other fields will be left as their default value.
-* You can implement `OnHotLoad` or `OnHotUnload` to manually copy state over if
-  you have more complicated needs.
+* You can implement `OnHotReload` to manually copy state over if you have more
+  complicated needs.
 
 ## Life cycle events
 You can define any of the following static methods:
@@ -117,7 +112,7 @@ to reload in your own codebase.
 * Other assemblies will continue to use the original loaded assembly.
   This applies even if those other assemblies are then reloaded themselves.
 * Automatic field copying for arbitrary `MonoBehavior`s is limited. For anything
-  complex you will need to use `OnHotLoad`/`OnHotUnload`.
+  complex you will need to use `OnHotReload`.
 
 ## License
 HotReloadKSP is available under the MIT license.
