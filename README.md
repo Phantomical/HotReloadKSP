@@ -96,10 +96,12 @@ In short:
 You can define any of the following static methods:
 ```cs
 // Called on types in the new assembly being loaded in.
-static void OnHotLoad(Assembly old, Assembly new);
+static void OnHotLoad();
+static void OnHotLoad(Assembly oldAssembly);
 
 // Called on types in the old assembly that is being replaced.
-static void OnHotUnload(Assembly old, Assembly new);
+static void OnHotUnload();
+static void OnHotUnload(Assembly newAssembly);
 ```
 
 They will be called in the middle of MonoBehavior reload.
