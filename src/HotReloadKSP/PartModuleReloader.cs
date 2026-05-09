@@ -15,6 +15,7 @@ internal static class PartModuleReloader
         public string ModuleName;
         public ConfigNode PrefabNode;
         public ConfigNode PersistentNode;
+
         // Old module is kept alive across the swap so we can read its fields if
         // needed and remap part-level references that pointed at it; destroyed
         // during ReattachAndRestore finalization, mirroring MonoBehaviourReloader's
@@ -417,6 +418,8 @@ internal static class PartModuleReloader
                     continue;
                 if (!UnitySerializationNormalizer.IsUnitySerialized(f))
                     continue;
+                if (IsPartModuleInfrastructureField(f))
+                    continue;
 
                 try
                 {
@@ -424,14 +427,35 @@ internal static class PartModuleReloader
                 }
                 catch (Exception ex)
                 {
-                    Log.Warn(
-                        $"Field copy threw for {f.DeclaringType?.FullName}.{f.Name}"
-                    );
+                    Log.Warn($"Field copy threw for {f.DeclaringType?.FullName}.{f.Name}");
                     Log.LogException(ex);
                 }
             }
 
             t = t.BaseType;
+        }
+    }
+
+    // PartModule's [SerializeField] events/fields/actions are BaseEventList/
+    // BaseFieldList/BaseActionList instances built by ModularSetup during the
+    // new component's Awake, with each contained BaseEvent/BaseField/BaseAction
+    // bound to the new module as its host. Copying them from the prefab clobbers
+    // that fresh setup with prefab-bound containers, so PAW reads/writes and
+    // KSPEvent invocations route to the prefab module instead of the live one.
+    // resHandler likewise binds to a specific PartModule via SetPartModule.
+    static bool IsPartModuleInfrastructureField(FieldInfo f)
+    {
+        if (f.DeclaringType != typeof(PartModule))
+            return false;
+        switch (f.Name)
+        {
+            case "events":
+            case "fields":
+            case "actions":
+            case "resHandler":
+                return true;
+            default:
+                return false;
         }
     }
 
@@ -523,9 +547,7 @@ internal static class PartModuleReloader
             }
             catch (Exception ex)
             {
-                Log.Error(
-                    $"OnInitialize threw for {pm.moduleName} on part {part.partInfo?.name}"
-                );
+                Log.Error($"OnInitialize threw for {pm.moduleName} on part {part.partInfo?.name}");
                 Log.LogException(ex);
             }
         }
@@ -560,9 +582,7 @@ internal static class PartModuleReloader
             }
             catch (Exception ex)
             {
-                Log.Error(
-                    $"ApplyUpgrades threw for {pm.moduleName} on part {part.partInfo?.name}"
-                );
+                Log.Error($"ApplyUpgrades threw for {pm.moduleName} on part {part.partInfo?.name}");
                 Log.LogException(ex);
             }
         }
