@@ -69,21 +69,18 @@ public static class HotReload
         Log.Info($"Reloading {targetSimpleName}");
 
         var oldAssembly = AssemblySwap.Swap(newAssembly, targetSimpleName).OldAssembly;
+
         UpdateTypeLookups(oldAssembly, newAssembly);
+        InvokeStaticHotLoadHooks(newAssembly, oldAssembly);
+        ReloadCustomParameters(oldAssembly, newAssembly);
+        ReloadScenarioModules(oldAssembly, newAssembly);
         ReloadVesselModules(oldAssembly, newAssembly);
         ReloadPartModules(oldAssembly, newAssembly);
-        ReloadScenarioModules(oldAssembly, newAssembly);
-        ReloadCustomParameters(oldAssembly, newAssembly);
 
-        // Two-phase MonoBehaviour reload: new components are attached on inactive
-        // parents first so static OnHotLoad can populate new-assembly static state
-        // before any reattached component's OnEnable runs, and OnHotUnload can tear
-        // down old-assembly static state while its live components still exist.
         var pending =
             oldAssembly == null
                 ? MonoBehaviourReloader.Pending.Empty
                 : MonoBehaviourReloader.PrepareReload(oldAssembly, newAssembly);
-        InvokeStaticHotLoadHooks(newAssembly, oldAssembly);
         StopPQSSpheres(pending.PQSToRebuild);
 
         try
@@ -259,12 +256,12 @@ public static class HotReload
 
     /// <summary>
     /// Invoke <c>static void OnHotLoad()</c> or <c>static void OnHotLoad(Assembly oldAssembly)</c>
-    /// on every type in <paramref name="newAssembly"/> that declares one. Runs after replacement
-    /// components have been attached (while still inactive) and before their parent GameObjects are
-    /// re-enabled, so new static state (prefab caches, registries) is populated before any
-    /// reattached component's <c>OnEnable</c> observes it. The single-parameter overload receives
-    /// the assembly being replaced (null on first-time loads). Exceptions from individual hooks are
-    /// logged but do not abort the sweep.
+    /// on every type in <paramref name="newAssembly"/> that declares one. Runs at the start of the
+    /// reload, after type lookups are updated and before any live module/component is rebuilt, so
+    /// new static state (prefab caches, registries) is populated before any rebuilt module's
+    /// <c>Load</c>/<c>OnLoad</c> can observe it. The single-parameter overload receives the assembly
+    /// being replaced (null on first-time loads). Exceptions from individual hooks are logged but do
+    /// not abort the sweep.
     /// </summary>
     static void InvokeStaticHotLoadHooks(Assembly newAssembly, Assembly oldAssembly)
     {
