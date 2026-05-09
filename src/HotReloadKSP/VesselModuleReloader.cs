@@ -168,6 +168,8 @@ internal static class VesselModuleReloader
             if (v == null || v.gameObject == null)
                 continue;
 
+            var attached = new List<VesselModule>();
+
             foreach (var w in newWrappers)
             {
                 if (v.gameObject.GetComponent(w.type) != null)
@@ -178,40 +180,68 @@ internal static class VesselModuleReloader
                 m.Vessel = v;
                 m.enabled = m.ShouldBeActive();
                 v.vesselModules.Add(m);
+                attached.Add(m);
             }
 
-            if (!byVessel.TryGetValue(v.persistentId, out var vesselSnaps))
-                continue;
-
-            foreach (var snap in vesselSnaps)
+            if (byVessel.TryGetValue(v.persistentId, out var vesselSnaps))
             {
-                VesselModule target = null;
-                for (int j = 0; j < v.vesselModules.Count; j++)
+                foreach (var snap in vesselSnaps)
                 {
-                    var m = v.vesselModules[j];
-                    if (m != null && m.GetType().Name == snap.TypeName)
+                    VesselModule target = null;
+                    for (int j = 0; j < v.vesselModules.Count; j++)
                     {
-                        target = m;
-                        break;
+                        var m = v.vesselModules[j];
+                        if (m != null && m.GetType().Name == snap.TypeName)
+                        {
+                            target = m;
+                            break;
+                        }
+                    }
+
+                    if (target == null)
+                    {
+                        Log.Warn(
+                            $"Could not find reattached module {snap.TypeName} on vessel {v.vesselName}"
+                        );
+                        continue;
+                    }
+
+                    try
+                    {
+                        target.Load(snap.Node);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error($"Load threw for {snap.TypeName} on vessel {v.vesselName}");
+                        Log.LogException(ex);
                     }
                 }
+            }
 
-                if (target == null)
+            // KSP fires OnLoadVessel on every VesselModule once the vessel is
+            // marked loaded (Vessel.cs:1708). The freshly attached modules
+            // skipped that lifecycle step; replay it now for vessels that are
+            // currently loaded. Unloaded vessels haven't had OnLoadVessel
+            // fired on their existing modules either, so leave the new ones
+            // alone until KSP's normal load path runs.
+            if (v.loaded)
+            {
+                for (int k = 0; k < attached.Count; k++)
                 {
-                    Log.Warn(
-                        $"Could not find reattached module {snap.TypeName} on vessel {v.vesselName}"
-                    );
-                    continue;
-                }
-
-                try
-                {
-                    target.Load(snap.Node);
-                }
-                catch (Exception ex)
-                {
-                    Log.Error($"Load threw for {snap.TypeName} on vessel {v.vesselName}");
-                    Log.LogException(ex);
+                    var m = attached[k];
+                    if (m == null)
+                        continue;
+                    try
+                    {
+                        m.OnLoadVessel();
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error(
+                            $"OnLoadVessel threw for {m.GetType().FullName} on vessel {v.vesselName}"
+                        );
+                        Log.LogException(ex);
+                    }
                 }
             }
         }

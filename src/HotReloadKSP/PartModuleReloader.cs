@@ -11,9 +11,15 @@ internal static class PartModuleReloader
     {
         public uint PartPersistentId;
         public int ModuleIndex;
+        public int ModuleOrd;
         public string ModuleName;
         public ConfigNode PrefabNode;
         public ConfigNode PersistentNode;
+        // Old module is kept alive across the swap so we can read its fields if
+        // needed and remap part-level references that pointed at it; destroyed
+        // during ReattachAndRestore finalization, mirroring MonoBehaviourReloader's
+        // FinalizeReload pattern.
+        public PartModule OldModule;
     }
 
     internal struct PawSnapshot
@@ -36,76 +42,82 @@ internal static class PartModuleReloader
             Paws = new List<PawSnapshot>(),
         };
 
-        if (FlightGlobals.fetch == null || FlightGlobals.Vessels == null)
-            return result;
-
-        for (int vi = 0; vi < FlightGlobals.Vessels.Count; vi++)
+        foreach (var part in EnumerateLiveParts())
         {
-            var v = FlightGlobals.Vessels[vi];
-            if (v == null || v.parts == null)
+            if (part == null || part.gameObject == null)
                 continue;
 
-            for (int pi = 0; pi < v.parts.Count; pi++)
+            bool pawClosed = false;
+            var captured = new HashSet<PartModule>();
+
+            for (int mi = part.Modules.Count - 1; mi >= 0; mi--)
             {
-                var part = v.parts[pi];
-                if (part == null || part.gameObject == null)
+                var m = part.Modules[mi];
+                if (m == null)
+                    continue;
+                if (m.GetType().Assembly != oldAsm)
                     continue;
 
-                bool pawClosed = false;
-
-                for (int mi = part.Modules.Count - 1; mi >= 0; mi--)
+                if (!pawClosed)
                 {
-                    var m = part.Modules[mi];
-                    if (m == null)
-                        continue;
-                    if (m.GetType().Assembly != oldAsm)
-                        continue;
+                    ClosePawsForPart(part, result.Paws);
+                    pawClosed = true;
+                }
 
-                    if (!pawClosed)
-                    {
-                        ClosePawsForPart(part, result.Paws);
-                        pawClosed = true;
-                    }
+                int ord = CountSameNamedBefore(part.Modules, m.moduleName, mi);
 
-                    var prefabNode = FindPrefabModuleNode(part, m, mi);
-                    var persistentNode = new ConfigNode(m.moduleName);
-                    try
-                    {
-                        m.Save(persistentNode);
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Warn(
-                            $"Save threw for {m.GetType().FullName} on part {part.partInfo?.name}"
-                        );
-                        Log.LogException(ex);
-                    }
-
-                    result.Modules.Add(
-                        new ModuleSnapshot
-                        {
-                            PartPersistentId = part.persistentId,
-                            ModuleIndex = mi,
-                            ModuleName = m.moduleName,
-                            PrefabNode = prefabNode,
-                            PersistentNode = persistentNode,
-                        }
+                var prefabNode = FindPrefabModuleNode(part, m.moduleName, ord);
+                var persistentNode = new ConfigNode(m.moduleName);
+                try
+                {
+                    m.Save(persistentNode);
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn(
+                        $"Save threw for {m.GetType().FullName} on part {part.partInfo?.name}"
                     );
-
-                    part.Modules.Remove(m);
-                    UnityEngine.Object.DestroyImmediate(m);
+                    Log.LogException(ex);
                 }
 
-                var stray = part.gameObject.GetComponents<PartModule>();
-                for (int k = 0; k < stray.Length; k++)
-                {
-                    var c = stray[k];
-                    if (c == null)
-                        continue;
-                    if (c.GetType().Assembly != oldAsm)
-                        continue;
-                    UnityEngine.Object.DestroyImmediate(c);
-                }
+                result.Modules.Add(
+                    new ModuleSnapshot
+                    {
+                        PartPersistentId = part.persistentId,
+                        ModuleIndex = mi,
+                        ModuleOrd = ord,
+                        ModuleName = m.moduleName,
+                        PrefabNode = prefabNode,
+                        PersistentNode = persistentNode,
+                        OldModule = m,
+                    }
+                );
+
+                captured.Add(m);
+
+                // Remove from the modules list so part.Modules reflects only
+                // live, valid modules during reattach. The Component itself
+                // stays alive on the GameObject until ReattachAndRestore
+                // finalizes - we may need to read its fields and we want
+                // part-level reference remap to be able to identify it.
+                part.Modules.Remove(m);
+            }
+
+            // Catch any leftover oldAsm Components that weren't tracked in
+            // part.Modules (orphans from earlier reloads, weird states); leave
+            // captured ones alone so finalization can destroy them after the
+            // remap pass runs.
+            var stray = part.gameObject.GetComponents<PartModule>();
+            for (int k = 0; k < stray.Length; k++)
+            {
+                var c = stray[k];
+                if (c == null)
+                    continue;
+                if (c.GetType().Assembly != oldAsm)
+                    continue;
+                if (captured.Contains(c))
+                    continue;
+                UnityEngine.Object.DestroyImmediate(c);
             }
         }
 
@@ -150,7 +162,8 @@ internal static class PartModuleReloader
                 if (old == null || old.moduleName != name)
                     continue;
 
-                var node = FindPrefabModuleNode(prefab, old, origIndex);
+                int ord = CountSameNamedBefore(prefab.Modules, name, origIndex);
+                var node = FindPrefabModuleNode(prefab, name, ord);
                 if (node == null)
                 {
                     Log.Warn(
@@ -177,6 +190,22 @@ internal static class PartModuleReloader
                 if (added == null)
                     continue;
 
+                UnitySerializationNormalizer.Normalize(added);
+
+                // Capture the post-cfg [KSPField] values as the prefab's
+                // "original" baseline so future Object.Instantiate'd live
+                // modules see the same revert/upgrade baseline PartLoader
+                // would have produced at startup.
+                try
+                {
+                    added.Fields?.SetOriginalValue();
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn($"SetOriginalValue threw for prefab {ap.name}/{name}");
+                    Log.LogException(ex);
+                }
+
                 MoveToIndex(prefab.Modules, added, origIndex);
                 touched = true;
             }
@@ -188,8 +217,6 @@ internal static class PartModuleReloader
 
     public static void ReattachAndRestore(ReloadSnapshot state, Assembly newAsm)
     {
-        if (FlightGlobals.fetch == null)
-            return;
         if (state.Modules.Count == 0)
         {
             ReopenPaws(state.Paws);
@@ -207,32 +234,37 @@ internal static class PartModuleReloader
             list.Add(s);
         }
 
+        var oldModulesToDestroy = new List<PartModule>(state.Modules.Count);
+
         foreach (var kv in byPart)
         {
             var part = FindPartByPersistentId(kv.Key);
             if (part == null)
             {
                 Log.Warn($"Part with persistentId {kv.Key} not found at reattach time; skipping");
+                // Schedule the orphaned old modules for destruction anyway.
+                foreach (var s in kv.Value)
+                    if (s.OldModule != null)
+                        oldModulesToDestroy.Add(s.OldModule);
                 continue;
             }
 
             var partSnaps = kv.Value;
             partSnaps.Sort((a, b) => a.ModuleIndex.CompareTo(b.ModuleIndex));
 
+            var rebuilt = new List<PartModule>(partSnaps.Count);
+            var remap = new Dictionary<PartModule, PartModule>(partSnaps.Count);
+
             foreach (var snap in partSnaps)
             {
-                if (snap.PrefabNode == null)
-                {
-                    Log.Warn(
-                        $"No prefab MODULE node captured for {snap.ModuleName} on part {part.partInfo?.name}; skipping"
-                    );
-                    continue;
-                }
-
+                // Bare AddComponent path - mirrors what Object.Instantiate
+                // produces during a real scene switch: single Awake (which
+                // runs ModularSetup, sets `part = GetComponent<Part>()`,
+                // OnAwake, resHandler init), no extra Load(prefabNode).
                 PartModule added;
                 try
                 {
-                    added = part.AddModule(snap.PrefabNode, forceAwake: true);
+                    added = part.AddModule(snap.ModuleName);
                 }
                 catch (Exception ex)
                 {
@@ -246,6 +278,38 @@ internal static class PartModuleReloader
                 if (added == null)
                     continue;
 
+                // Mirror what Unity's serializer carries during Instantiate:
+                // copy all serializable instance fields from the freshly
+                // rebuilt prefab module to the new live module. The prefab
+                // module was already Normalize'd by ReloadPrefabs, so this
+                // pulls Unity-default state for nulls plus any cfg-driven
+                // [KSPField] values the prefab inherited from Load(prefabNode).
+                var prefabModule = FindPrefabModule(part, snap.ModuleName, snap.ModuleOrd);
+                if (prefabModule != null)
+                    CopySerializedFields(prefabModule, added);
+                else
+                    Log.Warn(
+                        $"Prefab module {snap.ModuleName} (ord {snap.ModuleOrd}) not found on {part.partInfo?.name}; new module starts at C# defaults"
+                    );
+
+                // Snapshot cfg-default [KSPField] state as the "original"
+                // baseline for tweakable revert / upgrade-stats UI before
+                // overlaying persistent state, matching ProtoPartSnapshot.cs:924.
+                try
+                {
+                    added.Fields?.SetOriginalValue();
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn(
+                        $"SetOriginalValue threw for {snap.ModuleName} on part {part.partInfo?.name}"
+                    );
+                    Log.LogException(ex);
+                }
+
+                // Persistent-state overlay - same call chain that
+                // ConfigurePart triggers via LoadModule(node, ref idx) in
+                // KSP's normal scene-switch pipeline.
                 try
                 {
                     added.Load(snap.PersistentNode);
@@ -258,15 +322,331 @@ internal static class PartModuleReloader
 
                 int target = Mathf.Clamp(snap.ModuleIndex, 0, part.Modules.Count - 1);
                 MoveToIndex(part.Modules, added, target);
+
+                rebuilt.Add(added);
+                if (snap.OldModule != null)
+                    remap[snap.OldModule] = added;
+
+                RewireSnapshot(part, snap, added);
             }
 
             part.ClearModuleReferenceCache();
+
+            // Mirror the Part-level reference remap from
+            // ProtoPartSnapshot.cs:925-933: any non-value-type publicField on
+            // the Part that pointed at one of the destroyed-old modules gets
+            // repointed at its replacement.
+            RemapPartLevelReferences(part, remap);
+
+            // Vessel.Initialize / ShipConstruct.LoadShip parity.
+            RunOnInitializePass(part, rebuilt);
+
+            // Part.Start parity (ModulesOnStart -> ModulesBeforePartAttachJoint
+            // -> ModulesOnStartFinished).
+            RunStartPipeline(part, rebuilt);
+
+            foreach (var snap in partSnaps)
+                if (snap.OldModule != null)
+                    oldModulesToDestroy.Add(snap.OldModule);
+        }
+
+        // Destroy old modules last so the part-level remap has a chance to
+        // identify them by reference; matches MonoBehaviourReloader.FinalizeReload.
+        for (int i = 0; i < oldModulesToDestroy.Count; i++)
+        {
+            var old = oldModulesToDestroy[i];
+            if (old == null)
+                continue;
+            try
+            {
+                UnityEngine.Object.DestroyImmediate(old);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"DestroyImmediate threw for old PartModule {old.GetType().FullName}");
+                Log.LogException(ex);
+            }
         }
 
         ReopenPaws(state.Paws);
     }
 
-    static ConfigNode FindPrefabModuleNode(Part part, PartModule m, int moduleIndex)
+    static void CopySerializedFields(PartModule src, PartModule dst)
+    {
+        if (src == null || dst == null)
+            return;
+
+        var srcType = src.GetType();
+        var dstType = dst.GetType();
+        if (srcType != dstType)
+        {
+            Log.Warn(
+                $"CopySerializedFields type mismatch: src={srcType.FullName} dst={dstType.FullName}"
+            );
+            return;
+        }
+
+        const BindingFlags flags =
+            BindingFlags.Instance
+            | BindingFlags.Public
+            | BindingFlags.NonPublic
+            | BindingFlags.DeclaredOnly;
+
+        var t = srcType;
+        // Stop at MonoBehaviour for the same reason UnitySerializationNormalizer
+        // does: engine-private fields above MonoBehaviour are not user state.
+        while (t != null && t != typeof(MonoBehaviour) && t != typeof(object))
+        {
+            FieldInfo[] fields;
+            try
+            {
+                fields = t.GetFields(flags);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"GetFields threw for {t.FullName} during field copy");
+                Log.LogException(ex);
+                t = t.BaseType;
+                continue;
+            }
+
+            for (int i = 0; i < fields.Length; i++)
+            {
+                var f = fields[i];
+                if (f.IsLiteral || f.IsInitOnly)
+                    continue;
+                if (!UnitySerializationNormalizer.IsUnitySerialized(f))
+                    continue;
+
+                try
+                {
+                    f.SetValue(dst, f.GetValue(src));
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn(
+                        $"Field copy threw for {f.DeclaringType?.FullName}.{f.Name}"
+                    );
+                    Log.LogException(ex);
+                }
+            }
+
+            t = t.BaseType;
+        }
+    }
+
+    static void RemapPartLevelReferences(Part part, Dictionary<PartModule, PartModule> remap)
+    {
+        if (remap.Count == 0)
+            return;
+
+        var attrs = part.PartAttributes;
+        if (attrs?.publicFields == null)
+            return;
+
+        for (int i = 0; i < attrs.publicFields.Length; i++)
+        {
+            var f = attrs.publicFields[i];
+            if (f == null)
+                continue;
+            if (f.FieldType.IsValueType)
+                continue;
+            if (f.IsLiteral || f.IsInitOnly)
+                continue;
+
+            object current;
+            try
+            {
+                current = f.GetValue(part);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"GetValue threw for Part.{f.Name} during remap");
+                Log.LogException(ex);
+                continue;
+            }
+
+            if (current is not PartModule oldRef)
+                continue;
+            if (!remap.TryGetValue(oldRef, out var newRef))
+                continue;
+
+            try
+            {
+                f.SetValue(part, newRef);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"SetValue threw for Part.{f.Name} during remap");
+                Log.LogException(ex);
+            }
+        }
+    }
+
+    static void RewireSnapshot(Part part, ModuleSnapshot snap, PartModule newModule)
+    {
+        // Editor parts have no protoVessel; flight parts do. The proto
+        // back-pointers (proto.moduleRef <-> module.snapshot) are wired by
+        // ProtoPartModuleSnapshot.Load at scene-switch time; mirror that
+        // here so any KSP code reaching into protoVessel sees the live new
+        // module instead of a destroyed old reference.
+        var proto = part.protoPartSnapshot;
+        if (proto == null || proto.modules == null)
+            return;
+
+        int seen = 0;
+        for (int i = 0; i < proto.modules.Count; i++)
+        {
+            var pm = proto.modules[i];
+            if (pm == null || pm.moduleName != snap.ModuleName)
+                continue;
+            if (seen == snap.ModuleOrd)
+            {
+                pm.moduleRef = newModule;
+                newModule.snapshot = pm;
+                return;
+            }
+            seen++;
+        }
+    }
+
+    static void RunOnInitializePass(Part part, List<PartModule> rebuilt)
+    {
+        for (int i = 0; i < rebuilt.Count; i++)
+        {
+            var pm = rebuilt[i];
+            if (pm == null)
+                continue;
+            try
+            {
+                pm.OnInitialize();
+            }
+            catch (Exception ex)
+            {
+                Log.Error(
+                    $"OnInitialize threw for {pm.moduleName} on part {part.partInfo?.name}"
+                );
+                Log.LogException(ex);
+            }
+        }
+    }
+
+    static void RunStartPipeline(Part part, List<PartModule> rebuilt)
+    {
+        if (rebuilt.Count == 0)
+            return;
+
+        PartModule.StartState startState;
+        try
+        {
+            startState = part.GetModuleStartState();
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"GetModuleStartState threw for part {part.partInfo?.name}");
+            Log.LogException(ex);
+            return;
+        }
+
+        // ModulesOnStart parity (Part.cs:5615): ApplyUpgrades then OnStart.
+        for (int i = 0; i < rebuilt.Count; i++)
+        {
+            var pm = rebuilt[i];
+            if (pm == null)
+                continue;
+            try
+            {
+                pm.ApplyUpgrades(startState);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(
+                    $"ApplyUpgrades threw for {pm.moduleName} on part {part.partInfo?.name}"
+                );
+                Log.LogException(ex);
+            }
+        }
+
+        for (int i = 0; i < rebuilt.Count; i++)
+        {
+            var pm = rebuilt[i];
+            if (pm == null)
+                continue;
+            try
+            {
+                pm.OnStart(startState);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"OnStart threw for {pm.moduleName} on part {part.partInfo?.name}");
+                Log.LogException(ex);
+            }
+        }
+
+        // ModulesBeforePartAttachJoint parity (Part.cs:5694).
+        for (int i = 0; i < rebuilt.Count; i++)
+        {
+            var pm = rebuilt[i];
+            if (pm == null)
+                continue;
+            try
+            {
+                pm.OnStartBeforePartAttachJoint(startState);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(
+                    $"OnStartBeforePartAttachJoint threw for {pm.moduleName} on part {part.partInfo?.name}"
+                );
+                Log.LogException(ex);
+            }
+        }
+
+        // ModulesOnStartFinished parity (Part.cs:5674).
+        for (int i = 0; i < rebuilt.Count; i++)
+        {
+            var pm = rebuilt[i];
+            if (pm == null)
+                continue;
+            try
+            {
+                pm.OnStartFinished(startState);
+            }
+            catch (Exception ex)
+            {
+                Log.Error(
+                    $"OnStartFinished threw for {pm.moduleName} on part {part.partInfo?.name}"
+                );
+                Log.LogException(ex);
+            }
+            try
+            {
+                pm.ApplyAdjustersOnStart();
+            }
+            catch (Exception ex)
+            {
+                Log.Error(
+                    $"ApplyAdjustersOnStart threw for {pm.moduleName} on part {part.partInfo?.name}"
+                );
+                Log.LogException(ex);
+            }
+        }
+    }
+
+    static int CountSameNamedBefore(PartModuleList modules, string name, int beforeIndex)
+    {
+        int ord = 0;
+        int upper = beforeIndex < modules.Count ? beforeIndex : modules.Count;
+        for (int i = 0; i < upper; i++)
+        {
+            var pm = modules[i];
+            if (pm != null && pm.moduleName == name)
+                ord++;
+        }
+        return ord;
+    }
+
+    static ConfigNode FindPrefabModuleNode(Part part, string moduleName, int ord)
     {
         var partConfig = part.partInfo?.partConfig;
         if (partConfig == null)
@@ -276,22 +656,34 @@ internal static class PartModuleReloader
         if (moduleNodes == null || moduleNodes.Length == 0)
             return null;
 
-        int ord = 0;
-        for (int i = 0; i < moduleIndex && i < part.Modules.Count; i++)
-        {
-            var pm = part.Modules[i];
-            if (pm != null && pm.moduleName == m.moduleName)
-                ord++;
-        }
-
         int seen = 0;
         for (int i = 0; i < moduleNodes.Length; i++)
         {
             var n = moduleNodes[i];
-            if (n.GetValue("name") != m.moduleName)
+            if (n.GetValue("name") != moduleName)
                 continue;
             if (seen == ord)
                 return n;
+            seen++;
+        }
+
+        return null;
+    }
+
+    static PartModule FindPrefabModule(Part part, string moduleName, int ord)
+    {
+        var prefab = part.partInfo?.partPrefab;
+        if (prefab == null)
+            return null;
+
+        int seen = 0;
+        for (int i = 0; i < prefab.Modules.Count; i++)
+        {
+            var pm = prefab.Modules[i];
+            if (pm == null || pm.moduleName != moduleName)
+                continue;
+            if (seen == ord)
+                return pm;
             seen++;
         }
 
@@ -312,23 +704,47 @@ internal static class PartModuleReloader
         inner.Insert(index, module);
     }
 
-    static Part FindPartByPersistentId(uint persistentId)
+    static IEnumerable<Part> EnumerateLiveParts()
     {
-        var vessels = FlightGlobals.Vessels;
-        if (vessels == null)
-            return null;
-        for (int vi = 0; vi < vessels.Count; vi++)
+        if (HighLogic.LoadedSceneIsFlight)
         {
-            var v = vessels[vi];
-            if (v == null || v.parts == null)
-                continue;
-            for (int pi = 0; pi < v.parts.Count; pi++)
+            var vessels = FlightGlobals.Vessels;
+            if (vessels == null)
+                yield break;
+            for (int vi = 0; vi < vessels.Count; vi++)
             {
-                var p = v.parts[pi];
-                if (p != null && p.persistentId == persistentId)
-                    return p;
+                var v = vessels[vi];
+                if (v?.parts == null)
+                    continue;
+                for (int pi = 0; pi < v.parts.Count; pi++)
+                {
+                    var p = v.parts[pi];
+                    if (p != null)
+                        yield return p;
+                }
+            }
+            yield break;
+        }
+
+        if (HighLogic.LoadedSceneIsEditor)
+        {
+            var ship = EditorLogic.fetch?.ship;
+            if (ship?.Parts == null)
+                yield break;
+            for (int i = 0; i < ship.Parts.Count; i++)
+            {
+                var p = ship.Parts[i];
+                if (p != null)
+                    yield return p;
             }
         }
+    }
+
+    static Part FindPartByPersistentId(uint persistentId)
+    {
+        foreach (var p in EnumerateLiveParts())
+            if (p.persistentId == persistentId)
+                return p;
         return null;
     }
 
