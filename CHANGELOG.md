@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+## v0.1.4
+### Fixed
+* Avoid copying certain `PartModule` fields that are actually supposed to be
+  initialized by the part module itself.
+
 ## v0.1.3
 ### Added
 * MonoBehaviours containing `T[]` or `List<T>` where `T` is a type in the assembly
