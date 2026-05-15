@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+### Fixed
+* Sibling `PartModule` references on the same part (e.g. stock
+  `ModuleAnimationGroup._Modules` populated via `FindModulesImplementing`)
+  are now repointed at the new instance after a hot-reload swap, so
+  cross-module behaviour like the Drill-O-Matic spin animation tracks the
+  live module instead of the orphaned old one.
 
 ## v0.1.4
 ### Fixed

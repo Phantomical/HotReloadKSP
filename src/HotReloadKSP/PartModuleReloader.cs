@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
@@ -339,6 +340,12 @@ internal static class PartModuleReloader
             // repointed at its replacement.
             RemapPartLevelReferences(part, remap);
 
+            // Repoint sibling-PartModule caches (e.g. ModuleAnimationGroup._Modules
+            // populated via FindModulesImplementing) before OnInitialize/OnStart so
+            // the new modules' start pipeline observes a consistent sibling graph.
+            var rebuiltSet = new HashSet<PartModule>(rebuilt);
+            RemapSiblingModuleReferences(part, rebuiltSet, remap);
+
             // Vessel.Initialize / ShipConstruct.LoadShip parity.
             RunOnInitializePass(part, rebuilt);
 
@@ -502,6 +509,261 @@ internal static class PartModuleReloader
             catch (Exception ex)
             {
                 Log.Warn($"SetValue threw for Part.{f.Name} during remap");
+                Log.LogException(ex);
+            }
+        }
+    }
+
+    // Stock KSP modules cache references to other PartModules at OnLoad/OnStart
+    // via FindModulesImplementing<T>() (e.g. ModuleAnimationGroup._Modules). After
+    // a swap those caches still point at the old, soon-to-be-destroyed instances,
+    // freezing whatever state they held at swap time. Walk every other module on
+    // the same Part and repoint instance fields, arrays, IList elements, and
+    // IDictionary values at the new instances.
+    //
+    // Known limitations:
+    // - Cross-Part references aren't handled. The FindModulesImplementing pattern
+    //   that creates this bug is per-Part by construction.
+    // - VesselModule and ScenarioModule caches aren't handled here; they have
+    //   their own reloaders.
+    // - One level only - we don't recurse into nested objects.
+    // - Dictionary keys aren't remapped (would invalidate hash buckets); only
+    //   values are replaced.
+    static void RemapSiblingModuleReferences(
+        Part part,
+        HashSet<PartModule> rebuiltSet,
+        Dictionary<PartModule, PartModule> remap
+    )
+    {
+        if (remap.Count == 0)
+            return;
+
+        for (int i = 0; i < part.Modules.Count; i++)
+        {
+            var sibling = part.Modules[i];
+            if (sibling == null)
+                continue;
+            if (rebuiltSet.Contains(sibling))
+                continue;
+
+            RemapSiblingModuleFields(sibling, remap);
+        }
+    }
+
+    static void RemapSiblingModuleFields(
+        PartModule sibling,
+        Dictionary<PartModule, PartModule> remap
+    )
+    {
+        const BindingFlags flags =
+            BindingFlags.Instance
+            | BindingFlags.Public
+            | BindingFlags.NonPublic
+            | BindingFlags.DeclaredOnly;
+
+        var t = sibling.GetType();
+        // Stop at PartModule to avoid touching KSP/Unity-owned infrastructure
+        // fields (events/fields/actions/resHandler are bound to the new module
+        // by ModularSetup during Awake; the engine-private MonoBehaviour/Component
+        // fields above PartModule are not user state).
+        while (t != null && t != typeof(PartModule) && t != typeof(object))
+        {
+            FieldInfo[] fields;
+            try
+            {
+                fields = t.GetFields(flags);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"GetFields threw for {t.FullName} during sibling remap");
+                Log.LogException(ex);
+                t = t.BaseType;
+                continue;
+            }
+
+            for (int i = 0; i < fields.Length; i++)
+            {
+                var f = fields[i];
+                if (f.IsLiteral || f.IsInitOnly)
+                    continue;
+                var ft = f.FieldType;
+                if (ft.IsValueType)
+                    continue;
+                if (ft == typeof(string))
+                    continue;
+
+                object current;
+                try
+                {
+                    current = f.GetValue(sibling);
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn($"GetValue threw for {f.DeclaringType?.FullName}.{f.Name}");
+                    Log.LogException(ex);
+                    continue;
+                }
+                if (current == null)
+                    continue;
+
+                // Order matters: Array implements IList, so check Array first.
+                // IDictionary before IList in case of unusual types implementing
+                // both - keeps key/value semantics intact.
+                if (current is PartModule oldRef)
+                {
+                    RemapSingleField(sibling, f, oldRef, remap);
+                }
+                else if (current is Array arr)
+                {
+                    RemapArrayElements(arr, f, remap);
+                }
+                else if (current is IDictionary dict)
+                {
+                    RemapDictionaryValues(dict, f, remap);
+                }
+                else if (current is IList list)
+                {
+                    RemapListElements(list, f, remap);
+                }
+            }
+
+            t = t.BaseType;
+        }
+    }
+
+    static void RemapSingleField(
+        PartModule sibling,
+        FieldInfo f,
+        PartModule oldRef,
+        Dictionary<PartModule, PartModule> remap
+    )
+    {
+        if (!remap.TryGetValue(oldRef, out var newRef))
+            return;
+        try
+        {
+            f.SetValue(sibling, newRef);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn(
+                $"SetValue threw for {f.DeclaringType?.FullName}.{f.Name} during sibling remap"
+            );
+            Log.LogException(ex);
+        }
+    }
+
+    static void RemapArrayElements(Array arr, FieldInfo f, Dictionary<PartModule, PartModule> remap)
+    {
+        for (int i = 0; i < arr.Length; i++)
+        {
+            object elem;
+            try
+            {
+                elem = arr.GetValue(i);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"Array GetValue threw for {f.DeclaringType?.FullName}.{f.Name}[{i}]");
+                Log.LogException(ex);
+                continue;
+            }
+            if (elem is not PartModule oldRef)
+                continue;
+            if (!remap.TryGetValue(oldRef, out var newRef))
+                continue;
+            try
+            {
+                arr.SetValue(newRef, i);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"Array SetValue threw for {f.DeclaringType?.FullName}.{f.Name}[{i}]");
+                Log.LogException(ex);
+            }
+        }
+    }
+
+    static void RemapListElements(IList list, FieldInfo f, Dictionary<PartModule, PartModule> remap)
+    {
+        if (list.IsReadOnly || list.IsFixedSize)
+            return;
+        for (int i = 0; i < list.Count; i++)
+        {
+            object elem;
+            try
+            {
+                elem = list[i];
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"IList get threw for {f.DeclaringType?.FullName}.{f.Name}[{i}]");
+                Log.LogException(ex);
+                continue;
+            }
+            if (elem is not PartModule oldRef)
+                continue;
+            if (!remap.TryGetValue(oldRef, out var newRef))
+                continue;
+            try
+            {
+                list[i] = newRef;
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"IList set threw for {f.DeclaringType?.FullName}.{f.Name}[{i}]");
+                Log.LogException(ex);
+            }
+        }
+    }
+
+    static void RemapDictionaryValues(
+        IDictionary dict,
+        FieldInfo f,
+        Dictionary<PartModule, PartModule> remap
+    )
+    {
+        // Snapshot keys to avoid InvalidOperationException on modification during
+        // enumeration. Keys are intentionally not remapped - replacing a key
+        // would invalidate hash buckets.
+        var keys = new List<object>(dict.Count);
+        try
+        {
+            foreach (var k in dict.Keys)
+                keys.Add(k);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"IDictionary key enumeration threw for {f.DeclaringType?.FullName}.{f.Name}");
+            Log.LogException(ex);
+            return;
+        }
+
+        for (int i = 0; i < keys.Count; i++)
+        {
+            var key = keys[i];
+            object value;
+            try
+            {
+                value = dict[key];
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"IDictionary get threw for {f.DeclaringType?.FullName}.{f.Name}");
+                Log.LogException(ex);
+                continue;
+            }
+            if (value is not PartModule oldRef)
+                continue;
+            if (!remap.TryGetValue(oldRef, out var newRef))
+                continue;
+            try
+            {
+                dict[key] = newRef;
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"IDictionary set threw for {f.DeclaringType?.FullName}.{f.Name}");
                 Log.LogException(ex);
             }
         }
