@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+### Added
+* Other assemblies can now declare a `static void OnHotReload(Assembly old,
+  Assembly new)` method that gets invoked on every hot-reload of a *different*
+  assembly. The set of declaring types is cached per-assembly so the broadcast
+  doesn't rescan every type on every reload.
+
 ### Fixed
 * Sibling `PartModule` references on the same part (e.g. stock
   `ModuleAnimationGroup._Modules` populated via `FindModulesImplementing`)

@@ -101,9 +101,16 @@ static void OnHotUnload(Assembly newAssembly);
 
 They will be called in the middle of MonoBehavior reload.
 
-If you need to do things when _other_ assemblies are reloaded then you can add
-a listener to `HotReload.OnAssemblyHotReload` and then drive whatever you want
-to reload in your own codebase.
+If you need to do things when _other_ assemblies are reloaded you have two
+options:
+* Add a listener to `HotReload.OnAssemblyHotReload`.
+* Declare a static method with this signature on any type in your assembly:
+  ```cs
+  static void OnHotReload(Assembly oldAssembly, Assembly newAssembly);
+  ```
+  It will be invoked whenever an assembly *other than your own* is hot-reloaded.
+  The set of declaring types is cached, so adding this method is cheap even on
+  large codebases.
 
 ## Limitations
 * Global state is not transferred. If you have something that needs to be

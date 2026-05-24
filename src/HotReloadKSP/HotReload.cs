@@ -93,6 +93,9 @@ public static class HotReload
             Debug.LogException(e);
         }
 
+        OnHotReloadDispatch.Broadcast(oldAssembly, newAssembly);
+        OnHotReloadDispatch.OnReloaded(oldAssembly, newAssembly);
+
         InvokeStaticHotUnloadHooks(oldAssembly, newAssembly);
         MonoBehaviourReloader.FinalizeReload(pending);
         StartPQSSpheres(pending.PQSToRebuild);
