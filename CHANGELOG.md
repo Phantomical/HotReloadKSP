@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+
+## v0.1.5
 ### Added
 * Other assemblies can now declare a `static void OnHotReload(Assembly old,
   Assembly new)` method that gets invoked on every hot-reload of a *different*
