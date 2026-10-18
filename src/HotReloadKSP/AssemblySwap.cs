@@ -13,13 +13,13 @@ internal static class AssemblySwap
         public bool WasFirstLoad;
     }
 
-    public static Result Swap(Assembly newAsm) => Swap(newAsm, newAsm.GetName().Name);
+    public static Result Swap(Assembly newAsm) => Swap(newAsm, newAsm.GetName().Name, null);
 
-    public static Result Swap(Assembly newAsm, string targetName)
+    public static Result Swap(Assembly newAsm, string targetName, string path)
     {
         // Match on LoadedAssembly.name, not la.assembly.GetName().Name: after a
         // prior reload the runtime Assembly's simple name is the rewritten
-        // "-HR<guid>" form, while la.name keeps the original simple name.
+        // "-HR<guid>" form, while la.name keeps the original DLL file name.
         AssemblyLoader.LoadedAssembly existing = null;
         foreach (var la in AssemblyLoader.loadedAssemblies)
         {
@@ -32,7 +32,8 @@ internal static class AssemblySwap
 
         if (existing == null)
         {
-            var path = SafeLocation(newAsm);
+            if (string.IsNullOrEmpty(path))
+                path = SafeLocation(newAsm);
             var fresh = new AssemblyLoader.LoadedAssembly(newAsm, path, path, null);
             PopulateTypeIndexes(fresh, newAsm);
             AssemblyLoader.loadedAssemblies.Add(fresh);
@@ -62,14 +63,16 @@ internal static class AssemblySwap
 
     private static string SafeLocation(Assembly asm)
     {
+        // Assemblies loaded from bytes report an empty Location, which
+        // LoadedAssembly's constructor rejects via Path.GetDirectoryName.
+        string location = null;
         try
         {
-            return asm.Location ?? asm.GetName().Name;
+            location = asm.Location;
         }
-        catch
-        {
-            return asm.GetName().Name;
-        }
+        catch { }
+
+        return string.IsNullOrEmpty(location) ? asm.GetName().Name + ".dll" : location;
     }
 
     private static void PopulateTypeIndexes(AssemblyLoader.LoadedAssembly la, Assembly asm)

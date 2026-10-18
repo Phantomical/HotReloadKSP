@@ -38,8 +38,12 @@ public static class HotReload
         // include a concrete symbol provider, so reloaded assemblies don't carry
         // debug info. The originally-loaded assembly keeps its PDB; only the
         // hot-reloaded image loses line numbers in stack traces.
-        var (rewritten, originalName) = RewriteIdentity(dllBytes);
-        ReloadCore(Assembly.Load(rewritten), originalName);
+        var (rewritten, _) = RewriteIdentity(dllBytes);
+
+        // KSP names LoadedAssembly entries after the DLL file, not the
+        // assembly's simple name, and the two can differ (e.g. RP-1 ships
+        // RP-0.dll containing assembly RP0). Target the entry by file name.
+        ReloadCore(Assembly.Load(rewritten), Path.GetFileNameWithoutExtension(path), path);
     }
 
     /// <summary>
@@ -52,10 +56,10 @@ public static class HotReload
         if (newAssembly == null)
             throw new ArgumentNullException(nameof(newAssembly));
 
-        ReloadCore(newAssembly, newAssembly.GetName().Name);
+        ReloadCore(newAssembly, newAssembly.GetName().Name, null);
     }
 
-    static void ReloadCore(Assembly newAssembly, string targetSimpleName)
+    static void ReloadCore(Assembly newAssembly, string targetSimpleName, string path)
     {
         if (IsAlreadyLoaded(newAssembly, targetSimpleName))
         {
@@ -68,7 +72,7 @@ public static class HotReload
         var sw = System.Diagnostics.Stopwatch.StartNew();
         Log.Info($"Reloading {targetSimpleName}");
 
-        var oldAssembly = AssemblySwap.Swap(newAssembly, targetSimpleName).OldAssembly;
+        var oldAssembly = AssemblySwap.Swap(newAssembly, targetSimpleName, path).OldAssembly;
 
         UpdateTypeLookups(oldAssembly, newAssembly);
         InvokeStaticHotLoadHooks(newAssembly, oldAssembly);

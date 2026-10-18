@@ -13,6 +13,9 @@
   are now repointed at the new instance after a hot-reload swap, so
   cross-module behaviour like the Drill-O-Matic spin animation tracks the
   live module instead of the orphaned old one.
+* Fixed `ArgumentException: Invalid path` when reloading an assembly whose
+  DLL file name differs from its assembly name (e.g. RP-1's `RP-0.dll`,
+  which contains assembly `RP0`).
 
 ## v0.1.4
 ### Fixed
