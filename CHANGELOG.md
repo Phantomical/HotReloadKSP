@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+### Added
+* MonoBehaviours can now declare `void OnBeforeHotReload()`, which is called
+  on the old component before its game object is deactivated, and
+  `void OnAfterHotReload()`, which is called on the new component after it has
+  been enabled. This allows tearing down and rebuilding things that require an
+  active game object, such as toolbar buttons (#5).
 
 ## v0.1.5
 ### Added

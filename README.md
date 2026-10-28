@@ -62,7 +62,12 @@ There's no way to serialize their state in a way that will work most components.
 This means that hot-reload support for them is a bit more limited.
 
 Here's how hot-reloading a MonoBehavior works:
-* The game object containing the MonoBehavior is first disabled.
+* `OnBeforeHotReload` is called on the old component, while its game object is
+  still active, if it has a method with this signature:
+  ```cs
+  void OnBeforeHotReload();
+  ```
+* The game object containing the MonoBehavior is then disabled.
 * Corresponding MonoBehaviors from the new assembly are copied over.
 * Fields on the old object are copied over to the new one as long as they do
   have types from the assembly being reloaded. This means that a field of type
@@ -77,6 +82,11 @@ Here's how hot-reloading a MonoBehavior works:
   ```
 * The old component is then re-enabled and destroyed.
 * The new component is now re-enabled.
+* `OnAfterHotReload` is called on the new component, once all new components
+  have been enabled, if it has a method with this signature:
+  ```cs
+  void OnAfterHotReload();
+  ```
 
 In short:
 * All fields with types defined in other assemblies are copied over by default.
@@ -86,6 +96,8 @@ In short:
 * All other fields will be left as their default value.
 * You can implement `OnHotReload` to manually copy state over if you have more
   complicated needs.
+* You can implement `OnBeforeHotReload` and `OnAfterHotReload` to tear down and
+  rebuild things that need an active game object (e.g. toolbar buttons).
 
 ## Life cycle events
 You can define any of the following static methods:

@@ -14,6 +14,7 @@ internal static class MonoBehaviourReloader
     {
         public Type Type;
         public MethodInfo Hook;
+        public MethodInfo AfterHook;
         public SafeField[] SafeFields;
     }
 
@@ -46,6 +47,7 @@ internal static class MonoBehaviourReloader
         public MonoBehaviour Old;
         public MonoBehaviour New;
         public MethodInfo Hook;
+        public MethodInfo AfterHook;
         public SafeField[] NewFields;
         public FieldInfo[] OldFields;
         public string TypeName;
@@ -65,10 +67,11 @@ internal static class MonoBehaviourReloader
     }
 
     /// <summary>
-    /// Attach replacement components on inactive parent GameObjects, copy fields
-    /// across, and invoke each type's optional instance <c>OnHotReload</c> hook.
-    /// Parents stay inactive and old components stay alive until
-    /// <see cref="FinalizeReload"/> runs.
+    /// Invoke each old component's optional instance <c>OnBeforeHotReload</c> hook
+    /// while its GameObject is still active, then attach replacement components on
+    /// inactive parent GameObjects, copy fields across, and invoke each type's
+    /// optional instance <c>OnHotReload</c> hook. Parents stay inactive and old
+    /// components stay alive until <see cref="FinalizeReload"/> runs.
     /// </summary>
     internal static Pending PrepareReload(Assembly oldAsm, Assembly newAsm)
     {
@@ -81,6 +84,35 @@ internal static class MonoBehaviourReloader
             return Pending.Empty;
 
         var oldFieldCache = new Dictionary<Type, FieldInfo[]>();
+
+        // Give old components a chance to tear down anything that needs their
+        // GameObject to still be active (e.g. toolbar buttons) before we
+        // deactivate it. Only components that will actually be swapped get the
+        // hook, so it always pairs with OnAfterHotReload on the replacement.
+        var beforeHookCache = new Dictionary<Type, MethodInfo>();
+        foreach (var oldComp in candidates)
+        {
+            if (oldComp == null)
+                continue;
+            var oldType = oldComp.GetType();
+            if (!newTypes.ContainsKey(oldType.FullName))
+                continue;
+
+            if (!beforeHookCache.TryGetValue(oldType, out var beforeHook))
+            {
+                beforeHook = oldType.GetMethod(
+                    "OnBeforeHotReload",
+                    HookFlags,
+                    null,
+                    Type.EmptyTypes,
+                    null
+                );
+                beforeHookCache[oldType] = beforeHook;
+            }
+
+            if (beforeHook != null)
+                InvokeHook(beforeHook, oldComp, null, oldType.FullName);
+        }
 
         // Record the pre-swap activeSelf for every parent GameObject once, so that
         // multiple swapped components sharing a GameObject don't stomp each other.
@@ -150,6 +182,7 @@ internal static class MonoBehaviourReloader
                     Old = oldComp,
                     New = newComp,
                     Hook = entry.Hook,
+                    AfterHook = entry.AfterHook,
                     NewFields = entry.SafeFields,
                     OldFields = GetOldFields(oldType, entry.SafeFields, oldFieldCache),
                     TypeName = typeName,
@@ -168,20 +201,7 @@ internal static class MonoBehaviourReloader
         {
             if (s.Hook == null)
                 continue;
-            try
-            {
-                s.Hook.Invoke(s.New, [s.Old]);
-            }
-            catch (TargetInvocationException tie)
-            {
-                Log.Error($"OnHotReload threw for {s.TypeName}");
-                Log.LogException(tie.InnerException ?? tie);
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"OnHotReload threw for {s.TypeName}");
-                Log.LogException(ex);
-            }
+            InvokeHook(s.Hook, s.New, [s.Old], s.TypeName);
         }
 
         return new Pending(swaps, originalActive, pqsToRebuild);
@@ -191,7 +211,9 @@ internal static class MonoBehaviourReloader
     /// Restore each parent GameObject's original <c>activeSelf</c>, destroy the old
     /// components left behind by <see cref="PrepareReload"/>, then enable the new
     /// components so their <c>OnEnable</c> runs only after the matching old
-    /// component's <c>OnDisable</c>/<c>OnDestroy</c> have finished.
+    /// component's <c>OnDisable</c>/<c>OnDestroy</c> have finished. Once every new
+    /// component is enabled, invoke each one's optional instance
+    /// <c>OnAfterHotReload</c> hook.
     /// </summary>
     internal static void FinalizeReload(Pending pending)
     {
@@ -226,6 +248,31 @@ internal static class MonoBehaviourReloader
             }
 
             Log.Info($"Hot-reloaded MonoBehaviour {s.TypeName}");
+        }
+
+        foreach (var s in pending.Swaps)
+        {
+            if (s.AfterHook == null || s.New == null)
+                continue;
+            InvokeHook(s.AfterHook, s.New, null, s.TypeName);
+        }
+    }
+
+    static void InvokeHook(MethodInfo hook, MonoBehaviour target, object[] args, string typeName)
+    {
+        try
+        {
+            hook.Invoke(target, args);
+        }
+        catch (TargetInvocationException tie)
+        {
+            Log.Error($"{hook.Name} threw for {typeName}");
+            Log.LogException(tie.InnerException ?? tie);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"{hook.Name} threw for {typeName}");
+            Log.LogException(ex);
         }
     }
 
@@ -501,11 +548,13 @@ internal static class MonoBehaviourReloader
                 continue;
 
             var hook = t.GetMethod("OnHotReload", HookFlags, null, [typeof(MonoBehaviour)], null);
+            var afterHook = t.GetMethod("OnAfterHotReload", HookFlags, null, Type.EmptyTypes, null);
 
             index[t.FullName] = new TypeEntry
             {
                 Type = t,
                 Hook = hook,
+                AfterHook = afterHook,
                 SafeFields = CollectSafeFields(t, newAsm),
             };
         }
